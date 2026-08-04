@@ -1,0 +1,22 @@
+[
+  {
+    "query": "What kind of republic does Nepal's constitution establish?",
+    "reference_chunk_ids": ["c1"]
+  },
+  {
+    "query": "How many provinces does Nepal have?",
+    "reference_chunk_ids": ["c2"]
+  },
+  {
+    "query": "What is the highest court in Nepal?",
+    "reference_chunk_ids": ["c3"]
+  },
+  {
+    "query": "What right do citizens have under Article 27?",
+    "reference_chunk_ids": ["c4"]
+  },
+  {
+    "query": "Who is the head of government in Nepal?",
+    "reference_chunk_ids": ["c5"]
+  }
+]
