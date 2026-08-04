@@ -1,4 +1,4 @@
-# ⚓ Anchor
+# Anchor
 
 **A deterministic-first evaluation and tracing layer for RAG pipelines.**
 
