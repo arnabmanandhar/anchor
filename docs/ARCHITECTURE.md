@@ -28,9 +28,10 @@
 | `records.py` | Parses and validates logged outputs (JSON/JSONL/CSV, common field aliases) | — |
 | `sandbox.py` | Toy RAG parts for the dashboard: corpus parsing, BM25 / TF-IDF / keyword / hybrid retrievers, extractive or Claude generators. Sample input, not part of evaluation. | — |
 | `compare.py` | Aggregate means, a per-question diff matched by query text, and per-metric significance | tracer, stats |
+| `synth.py` | Question generation (templates or Claude) with reference ids known by construction; de-duplication and difficulty labels | sandbox, anthropic (optional) |
 | `stats.py` | Paired bootstrap CIs, sign-flip permutation test, minimum detectable effect. Pure Python, seeded. | — |
 | `gate.py` | Floors and allowed drops (optionally only significant drops), returning a pass/fail result | compare |
-| `cli.py` | `anchor demo · run · score · compare · gate` | all |
+| `cli.py` | `anchor demo · run · score · compare · gate · synth` | all |
 | `dashboard/app.py`, `views.py`, `ui.py` | Streamlit navigation, pages, styles and charts | all, streamlit, altair |
 
 ## Design decisions
@@ -50,6 +51,10 @@
   and a p-value from a paired test, so "v3 is better" is a claim Anchor can
   back up. Tests are seeded and the permutation test is exact on small
   sets, so these numbers are as reproducible as the metrics.
+- **Ground truth by construction.** Generated questions carry the ids of
+  the chunks they were written from, and every generated set passes the
+  same deterministic checks (duplicates, leaked answers, difficulty),
+  whichever generator wrote it.
 - **SQLite, no server.** Traces are one file, easy to inspect, copy or
   delete. The dashboard reads the same file the CLI writes.
 - **Safe to host publicly.** Keys stay in the session. Errors are reduced
@@ -74,6 +79,9 @@ ids), `latency_ms`, `cost_usd`, `created_at`.
   leakage on failure
 - `test_tracer_compare_gate.py`: storage, upgrades of old databases,
   per-question regressions, gate exit codes
+- `test_synth.py`: each template rule, ground truth, unanswerable topics
+  absent from the corpus, determinism, de-duplication, difficulty, the
+  Claude path with the API mocked, and the CLI round trip
 - `test_stats.py`: hand-computed p-values, CIs and detectable effect;
   determinism; the gate ignoring noise but not real drops
 - `test_sandbox_records.py`: retrievers, corpus, dataset and record parsing

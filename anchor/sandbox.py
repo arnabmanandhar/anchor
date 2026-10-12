@@ -255,7 +255,10 @@ def parse_dataset(data: bytes | str, filename: str = "dataset.json") -> List[Dic
     for r in rows:
         query = str(r.get("query", "")).strip()
         if query:
-            out.append({"query": query, "reference_chunk_ids": parse_reference_ids(r.get("reference_chunk_ids"))})
+            row = {"query": query, "reference_chunk_ids": parse_reference_ids(r.get("reference_chunk_ids"))}
+            # Keep what `anchor synth` adds, so a generated set round-trips.
+            row.update({k: r[k] for k in ("reference_answer", "type", "difficulty") if r.get(k)})
+            out.append(row)
     if not out:
         raise ValueError("No questions found (each row needs a 'query').")
     return out

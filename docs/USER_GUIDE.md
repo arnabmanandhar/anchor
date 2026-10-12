@@ -70,6 +70,15 @@ Assemble a small RAG pipeline from built-in parts and evaluate it.
    the ground truth: the ids of chunks that should be retrieved, comma
    separated. They are optional. Without them only faithfulness is scored.
    Anchor warns you if an id isn't in the corpus.
+
+   **No questions yet?** Open **Generate questions from this corpus**.
+   Choose how many, which types (single-hop, multi-hop, unanswerable) and
+   the generator (offline templates, or Claude with a key), then click
+   **Generate questions**. Each question comes with its reference ids and
+   a difficulty label. Untick or edit rows, then **Replace** the question
+   table with them, **Add** them to it, or **Download** them as JSON.
+   *Skip easy questions* drops ones keyword overlap already gets right.
+   See [SYNTHETIC_DATA.md](SYNTHETIC_DATA.md) for how it works.
 3. **Pipeline.**
    - **Retriever:** BM25, TF-IDF, keyword overlap (deliberately weak), or
      hybrid (BM25 and TF-IDF fused with reciprocal-rank fusion). All
@@ -187,6 +196,7 @@ anchor score outputs.jsonl -v prod-2026-10-11  # score logged outputs (same form
 anchor compare v2 v3                           # means, deltas, regressed questions, significance
 anchor gate v3 --min-recall 0.9 --baseline v2 --max-faithfulness-drop 0.05
 anchor gate v3 --baseline v2 --max-recall-drop 0.02 --require-significant
+anchor synth corpus.json -n 30 -o questions.json  # generate questions with reference ids
 ```
 
 Every command takes `--db PATH` (default `anchor_traces.db`). `run` and
@@ -196,6 +206,10 @@ Every command takes `--db PATH` (default `anchor_traces.db`). `run` and
 - **`anchor run`** imports `module:function`, a function taking a question
   and returning `(chunks, answer)`. Add `--factory` if the function builds
   and returns the pipeline instead.
+- **`anchor synth`** reads a corpus in any format the dashboard accepts
+  and writes a question set. `--generator auto|template|llm` (auto uses
+  Claude when `ANTHROPIC_API_KEY` is set), `--mix single_hop=6,multi_hop=2,unanswerable=2`,
+  `--drop-easy`, `--seed`. A one-line summary goes to stderr.
 - **`anchor compare`** prints JSON. Its `significance` block has, per
   metric, `n` (shared questions), `mean_delta`, `ci_low`/`ci_high`,
   `p_value`, `significant` and `mde` (smallest detectable change).
@@ -217,6 +231,10 @@ def my_pipeline(query: str):
 
 results = evaluate_pipeline(my_pipeline, dataset, pipeline_version="v3", k=5)
 print(summarize(results))
+
+# generate questions from your chunks
+from anchor.synth import generate_questions
+dataset = generate_questions(my_chunks, n=30, generator="template")   # or "llm" with api_key=...
 
 # is v3 really better than v2?
 from anchor import compare_versions

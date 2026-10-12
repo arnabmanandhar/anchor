@@ -109,6 +109,21 @@ Run the test suite (no key needed; CI runs it the same way):
 pytest -q
 ```
 
+## No labelled questions? Generate them
+
+Retrieval metrics need to know which chunks answer each question. Anchor
+can write the questions *from* your chunks, so that label comes for free:
+
+```bash
+anchor synth my_corpus.json -n 30 -o questions.json   # offline templates
+ANTHROPIC_API_KEY=sk-ant-... anchor synth my_corpus.json -n 30 -o questions.json   # natural questions from Claude
+```
+
+You get single-hop, multi-hop (needs two chunks) and unanswerable
+questions, de-duplicated and labelled easy, medium or hard by how the
+built-in retrievers rank their references. The dashboard has the same
+generator with a review table. See [docs/SYNTHETIC_DATA.md](docs/SYNTHETIC_DATA.md).
+
 ## Using it on your own pipeline
 
 Anchor only needs your pipeline to speak one contract: given a query,
@@ -193,7 +208,7 @@ You can run evaluations in the browser, not only view CLI runs:
 
 - **Evaluate** offers three ways in:
   - **Build and run a pipeline.** Load a corpus (sample, upload, or paste),
-    edit the questions in a table, and pick a retriever (BM25, TF-IDF,
+    edit the questions in a table or generate them from the corpus, and pick a retriever (BM25, TF-IDF,
     keyword or hybrid), k, a generator (extractive or Claude) and a judge.
     Then run. One checkbox runs every retriever for a quick comparison.
   - **Upload your pipeline's outputs.** Use a JSONL of the queries, ranked
@@ -222,6 +237,8 @@ workspace. See [DEPLOYMENT.md](DEPLOYMENT.md).
   API, file formats, configuration
 - [Metrics](docs/METRICS.md): what each score measures, the formulas, and
   worked examples
+- [Synthetic test sets](docs/SYNTHETIC_DATA.md): how `anchor synth`
+  writes questions, the quality checks, and their limits
 - [Architecture](docs/ARCHITECTURE.md): modules, data model, design
   decisions
 - [Deployment](DEPLOYMENT.md): secure public hosting on Streamlit
@@ -250,14 +267,15 @@ anchor/
   sandbox.py            Built-in toy retrievers + generators for the dashboard
   compare.py            Diffs two pipeline versions, overall and per query
   stats.py              Paired bootstrap CIs, permutation test, detectable effect
+  synth.py              Question generation with known reference ids
   gate.py               Pass/fail thresholds for CI
-  cli.py                `anchor demo | run | score | compare | gate`
+  cli.py                `anchor demo | run | score | compare | gate | synth`
 dashboard/
   app.py                Streamlit entry point + navigation
   views.py              Home, Evaluate, Results, Compare, Inspect, Learn
   ui.py                 Styles, score cards, fixed 0–1 charts
 docs/                   User guide, metrics derivations, architecture
 examples/               Sample corpus, questions, logged records, toy pipelines
-tests/                  Metrics, judge, sandbox, records, gate, dashboard (71 tests, offline)
+tests/                  Metrics, judge, sandbox, records, gate, dashboard (81 tests, offline)
 DEPLOYMENT.md           Secure public deploy on Streamlit Community Cloud
 ```

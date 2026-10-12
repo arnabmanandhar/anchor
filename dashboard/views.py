@@ -24,6 +24,7 @@ from anchor.retrieval_metrics import all_retrieval_metrics  # noqa: E402
 from anchor.runner import evaluate_pipeline, evaluate_records, summarize  # noqa: E402
 from anchor.sandbox import RETRIEVERS, make_pipeline, parse_corpus, parse_dataset, parse_reference_ids  # noqa: E402
 from anchor.schema import Chunk  # noqa: E402
+from anchor.synth import DEFAULT_MIX, QUESTION_TYPES, generate_questions  # noqa: E402
 from anchor.tracer import Tracer  # noqa: E402
 
 EXAMPLES = ROOT / "examples"
@@ -256,6 +257,113 @@ def _show_run_summary(results, versions):
         nav_link("compare", label="Compare versions", icon=":material/compare_arrows:", container=c2)
 
 
+def _set_questions(source: str, frame: pd.DataFrame) -> None:
+    """Replace the question table. Bumping the editor key drops the old
+    editor's pending edits, which would otherwise apply to the new rows."""
+    st.session_state[f"questions::{source}"] = frame.reset_index(drop=True)
+    st.session_state[f"qver::{source}"] = st.session_state.get(f"qver::{source}", 0) + 1
+
+
+TYPE_LABELS = {"single_hop": "Single-hop", "multi_hop": "Multi-hop", "unanswerable": "Unanswerable"}
+TYPE_KEYS = {v: k for k, v in TYPE_LABELS.items()}
+
+
+def _synth_panel(source: str, chunks) -> None:
+    skey = f"synth::{source}"
+    with st.expander("Generate questions from this corpus", icon=":material/auto_awesome:",
+                     expanded=skey in st.session_state):
+        st.caption(
+            "Each question is written from specific chunks, so its reference ids are known without labelling. "
+            "Review the list, untick anything you don't want, then add it to the question table."
+        )
+        key, _ = resolve_key()
+        c1, c2, c3 = st.columns([1, 2, 2])
+        n = c1.number_input("How many", 1, 60, 12, key=f"synth_n::{source}")
+        types = c2.multiselect("Question types", QUESTION_TYPES, default=list(QUESTION_TYPES),
+                               format_func=TYPE_LABELS.get, key=f"synth_types::{source}",
+                               help="Single-hop: one chunk answers it. Multi-hop: needs two chunks. "
+                                    "Unanswerable: on topic, but nothing in the corpus answers it.")
+        generator = c3.selectbox(
+            "Generator", ["template", "llm"], key=f"synth_gen::{source}",
+            format_func=lambda g: "Templates (offline)" if g == "template" else f"Claude ({DEFAULT_MODEL})",
+            help="Templates blank out one fact from a sentence: free and deterministic, but close to the source "
+                 "wording, so most questions are easy. Claude writes natural questions and needs an API key.")
+        c4, c5 = st.columns([2, 1])
+        drop_easy = c4.checkbox("Skip easy questions", key=f"synth_easy::{source}",
+                                help="Drops questions that plain keyword overlap already retrieves perfectly.")
+        seed = c5.number_input("Seed", 0, 9999, 0, key=f"synth_seed::{source}",
+                               help="Same seed, same corpus, same settings: same questions.")
+        problems = []
+        if not types:
+            problems.append("pick at least one question type")
+        if generator == "llm" and not key:
+            problems.append("add an API key in the sidebar, or use templates")
+        if generator == "llm" and n > MAX_LLM_CASES:
+            problems.append(f"keep Claude generation to {MAX_LLM_CASES} questions per click")
+        if problems:
+            st.caption("To generate: " + "; ".join(problems) + ".")
+        if st.button("Generate questions", disabled=bool(problems), key=f"synth_go::{source}"):
+            try:
+                with st.spinner("Generating…"):
+                    qs = generate_questions(chunks, n=int(n), mix={t: DEFAULT_MIX[t] for t in types},
+                                            generator=generator, api_key=key if generator == "llm" else None,
+                                            seed=int(seed), drop_easy=drop_easy)
+                if generator == "llm":
+                    charge_server_key(int(n))
+                st.session_state[skey] = pd.DataFrame([{
+                    "use": True, "query": q["query"], "reference_chunk_ids": ", ".join(q["reference_chunk_ids"]),
+                    "type": TYPE_LABELS[q["type"]], "difficulty": q["difficulty"],
+                    "reference_answer": q["reference_answer"] or "",
+                } for q in qs])
+                st.session_state[f"synth_ver::{source}"] = st.session_state.get(f"synth_ver::{source}", 0) + 1
+            except Exception as e:
+                st.error(f"Generation stopped: {type(e).__name__}.")
+        frame = st.session_state.get(skey)
+        if frame is None:
+            return
+        if frame.empty:
+            st.info("No questions came out. Try other types, untick *Skip easy questions*, or use a larger corpus.")
+            return
+        counts = frame["type"].value_counts()
+        levels = frame.loc[frame["difficulty"] != "n/a", "difficulty"].value_counts()
+        st.markdown(f"**{len(frame)} questions:** " + " · ".join(f"{v} {k.lower()}" for k, v in counts.items())
+                    + (f"  ·  difficulty: " + ", ".join(f"{levels.get(lv, 0)} {lv}" for lv in ("easy", "medium", "hard"))
+                       if not levels.empty else ""))
+        reviewed = st.data_editor(
+            frame, hide_index=True, width="stretch",
+            key=f"synth_editor::{source}::{st.session_state.get(f'synth_ver::{source}', 0)}",
+            disabled=["type", "difficulty"],
+            column_config={
+                "use": st.column_config.CheckboxColumn("Use", width="small"),
+                "query": st.column_config.TextColumn("Question", width="large"),
+                "reference_chunk_ids": st.column_config.TextColumn("Reference ids"),
+                "type": st.column_config.TextColumn("Type"),
+                "difficulty": st.column_config.TextColumn(
+                    "Difficulty", help="easy: keyword overlap alone ranks the reference first. hard: BM25 misses "
+                                       "it in the top 3. n/a: unanswerable."),
+                "reference_answer": st.column_config.TextColumn("Expected answer"),
+            },
+        )
+        chosen = reviewed[reviewed["use"]]
+        b1, b2, b3 = st.columns(3)
+        if b1.button(f"Replace questions with these {len(chosen)}", disabled=chosen.empty, key=f"synth_rep::{source}"):
+            _set_questions(source, chosen[["query", "reference_chunk_ids"]])
+            st.rerun()
+        if b2.button(f"Add these {len(chosen)} to the questions", disabled=chosen.empty, key=f"synth_add::{source}"):
+            current = st.session_state[f"questions::{source}"]
+            current = current[current["query"].astype(str).str.strip() != ""]
+            _set_questions(source, pd.concat([current, chosen[["query", "reference_chunk_ids"]]], ignore_index=True))
+            st.rerun()
+        b3.download_button(
+            "Download as JSON", key=f"synth_dl::{source}", mime="application/json", file_name="questions.json",
+            data=json.dumps([{"query": r.query, "reference_chunk_ids": parse_reference_ids(r.reference_chunk_ids) or [],
+                              "type": TYPE_KEYS[r.type], "reference_answer": r.reference_answer or None}
+                             for r in chosen.itertuples()], indent=2, ensure_ascii=False),
+        )
+        st.caption("Unanswerable questions have no reference ids, so they only get a faithfulness score. "
+                   "A good pipeline should answer them with \"I don't know\".")
+
+
 def _tab_build():
     st.markdown(
         "Build a small RAG pipeline from parts and evaluate it. Useful for learning what each metric "
@@ -301,15 +409,17 @@ def _tab_build():
                              help="JSON / JSONL of {query, reference_chunk_ids} or CSV with those columns.")
     if qfile is not None and st.session_state.get(f"qfile_loaded::{source}") != qfile.file_id:
         try:
-            st.session_state[qsrc_key] = _questions_frame(parse_dataset(qfile.getvalue(), qfile.name))
+            _set_questions(source, _questions_frame(parse_dataset(qfile.getvalue(), qfile.name)))
             st.session_state[f"qfile_loaded::{source}"] = qfile.file_id
         except Exception as e:
             st.error(f"Couldn't read the questions file: {e}")
+    if chunks:
+        _synth_panel(source, chunks)
     edited = st.data_editor(
         st.session_state[qsrc_key],
         num_rows="dynamic",
         width="stretch",
-        key=f"qeditor::{source}",
+        key=f"qeditor::{source}::{st.session_state.get(f'qver::{source}', 0)}",
         column_config={
             "query": st.column_config.TextColumn("Question", width="large", required=True),
             "reference_chunk_ids": st.column_config.TextColumn("Reference chunk ids", help="e.g. art-031, art-035"),

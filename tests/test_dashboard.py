@@ -42,7 +42,7 @@ def test_empty_workspace_is_seeded_with_demo(workspace):
 
 def test_build_and_run_all_retrievers():
     at = page("evaluate").run()
-    at.checkbox[0].check().run()
+    next(c for c in at.checkbox if c.label.startswith("Also run every other retriever")).check().run()
     run = next(b for b in at.button if b.label == "Run evaluation")
     run.click().run()
     assert not at.exception, [e.value for e in at.exception]
@@ -114,3 +114,13 @@ def test_compare_shows_significance_and_gate_toggle():
     at.toggle[0].set_value(True).run()
     assert not at.exception
     assert any("--require-significant" in c.value for c in at.code)
+
+
+def test_generate_questions_and_replace_the_table():
+    at = page("evaluate").run()
+    next(b for b in at.button if b.label == "Generate questions").click().run()
+    assert not at.exception
+    assert any("12 questions" in m.value for m in at.markdown)
+    next(b for b in at.button if b.label.startswith("Replace questions with these")).click().run()
+    assert not at.exception
+    assert len(at.session_state["questions::Sample: Constitution of Nepal (20 chunks)"]) == 12

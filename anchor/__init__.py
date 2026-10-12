@@ -17,6 +17,7 @@ from .records import load_records
 from .compare import compare_versions, significance
 from .stats import paired_test, bootstrap_ci, min_detectable_effect
 from .gate import run_gate, GateResult
+from .synth import generate_questions
 
 __all__ = [
     "Chunk",
@@ -44,6 +45,7 @@ __all__ = [
     "min_detectable_effect",
     "run_gate",
     "GateResult",
+    "generate_questions",
 ]
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

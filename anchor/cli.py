@@ -14,6 +14,8 @@ Commands:
     compare V_A V_B              Compare two pipeline versions in the DB.
     gate V [--min-recall ...]    Exit non-zero if V misses a floor or drops
                                  too far below --baseline. For CI.
+    synth CORPUS -n N -o FILE    Generate a question set from a corpus, with
+                                 reference chunk ids known by construction.
 """
 
 from __future__ import annotations
@@ -21,7 +23,9 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import sys
+from collections import Counter
 from pathlib import Path
 
 from .compare import compare_versions
@@ -29,6 +33,8 @@ from .gate import GATE_METRICS, run_gate
 from .judge import FaithfulnessJudge
 from .records import load_records
 from .runner import evaluate_pipeline, evaluate_records, summarize
+from .sandbox import parse_corpus
+from .synth import DEFAULT_MIX, generate_questions
 from .tracer import Tracer
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
@@ -96,6 +102,19 @@ def main(argv=None) -> int:
     score_p.add_argument("--judge", choices=["auto", "llm", "heuristic"], default="auto")
     score_p.add_argument("--db", default="anchor_traces.db")
 
+    syn_p = sub.add_parser("synth", help="Generate questions (with reference chunk ids) from a corpus")
+    syn_p.add_argument("corpus", help="corpus file: CSV id,text · JSON · JSONL · or text split by blank lines")
+    syn_p.add_argument("-n", type=int, default=20, help="number of questions (default 20)")
+    syn_p.add_argument("-o", "--output", help="write the questions here (JSON); default prints to stdout")
+    syn_p.add_argument("--generator", choices=["auto", "template", "llm"], default="auto",
+                       help="auto uses Claude if ANTHROPIC_API_KEY is set, else offline templates")
+    syn_p.add_argument("--mix", default=",".join(f"{t}={w:g}" for t, w in DEFAULT_MIX.items()),
+                       help="type weights, e.g. single_hop=6,multi_hop=2,unanswerable=2")
+    syn_p.add_argument("--drop-easy", action="store_true",
+                       help="drop questions that plain keyword overlap already retrieves perfectly")
+    syn_p.add_argument("-k", type=int, default=3, help="BM25 cutoff used for the 'hard' label (default 3)")
+    syn_p.add_argument("--seed", type=int, default=0)
+
     cmp_p = sub.add_parser("compare", help="Compare two pipeline versions")
     cmp_p.add_argument("version_a")
     cmp_p.add_argument("version_b")
@@ -130,6 +149,29 @@ def main(argv=None) -> int:
         judge = FaithfulnessJudge(backend=args.judge)
         results = evaluate_records(records, pipeline_version=args.version, k=args.k, judge=judge, db_path=args.db)
         print(json.dumps(summarize(results), indent=2))
+    elif args.command == "synth":
+        path = Path(args.corpus)
+        chunks = parse_corpus(path.read_bytes(), path.name)
+        try:
+            mix = {t.strip(): float(w) for t, w in (part.split("=") for part in args.mix.split(",") if part.strip())}
+        except ValueError:
+            parser.error("--mix looks like single_hop=6,multi_hop=2,unanswerable=2")
+        key = os.environ.get("ANTHROPIC_API_KEY")
+        generator = args.generator if args.generator != "auto" else ("llm" if key else "template")
+        if generator == "llm" and not key:
+            parser.error("--generator llm needs ANTHROPIC_API_KEY")
+        questions = generate_questions(chunks, n=args.n, mix=mix, generator=generator, api_key=key,
+                                       seed=args.seed, drop_easy=args.drop_easy, k=args.k)
+        text = json.dumps(questions, indent=2, ensure_ascii=False)
+        if args.output:
+            Path(args.output).write_text(text + "\n", encoding="utf-8")
+        else:
+            print(text)
+        types = Counter(q["type"] for q in questions)
+        levels = Counter(q["difficulty"] for q in questions if q["difficulty"] != "n/a")
+        print(f"{len(questions)} questions ({generator}): " + ", ".join(f"{v} {k}" for k, v in types.items())
+              + (" · difficulty " + ", ".join(f"{v} {k}" for k, v in levels.items()) if levels else ""),
+              file=sys.stderr)
     elif args.command == "compare":
         print(json.dumps(compare_versions(args.db, args.version_a, args.version_b, alpha=args.alpha), indent=2))
     elif args.command == "gate":
