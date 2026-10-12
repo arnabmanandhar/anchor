@@ -27,7 +27,10 @@ How keys are handled in code:
   `AuthenticationError`. The provider's error message is dropped, so it
   can't echo a key back onto the page.
 - The trace DB path is fixed on the server (`ANCHOR_DB` env var), so visitors
-  can't point the app at other files on the host.
+  can't point the app at other files on the host. With `ANCHOR_PUBLIC=1`,
+  each browser session gets its own temporary database instead.
+- LLM work per click is capped (`ANCHOR_MAX_LLM_CASES`, default 25). Use of
+  the server's key is capped per session (`ANCHOR_SERVER_KEY_SESSION_LIMIT`).
 - `tests/test_judge.py` and `tests/test_dashboard.py` check all of this.
 
 ## Deploy on Streamlit Community Cloud
@@ -35,12 +38,14 @@ How keys are handled in code:
 1. Push the repo to GitHub (public or private).
 2. Go to https://share.streamlit.io, choose **Create app**, then **Deploy a public app from GitHub**.
 3. Repository `arnabmanandhar/anchor`, branch `main`, main file path `dashboard/app.py`.
-4. Optional: under **Advanced settings → Secrets**, paste the contents of
-   `.streamlit/secrets.toml.example` with a real key. Skip this for a
-   zero-cost demo.
-5. Click **Deploy**. On first load the trace database is empty, so the app
-   seeds itself by running the bundled demo with the offline judge. Two
-   retriever variants appear, ready to compare.
+4. Under **Advanced settings → Secrets**, add `ANCHOR_PUBLIC = "1"`. This
+   gives every visitor a private workspace, so one visitor's runs and
+   uploads are never visible to another. Optionally, also paste the key
+   line from `.streamlit/secrets.toml.example` with a real key. Skip the
+   key for a zero-cost demo.
+5. Click **Deploy**. Each visitor's workspace starts seeded with the
+   bundled demo, two retriever variants ready to compare, and they can
+   run their own evaluations from the **Evaluate** page.
 
 Streamlit Cloud installs `requirements.txt` automatically. The app's disk
 is ephemeral, so a restart re-seeds the demo. That's fine, because the demo
@@ -87,15 +92,14 @@ After deploying:
   playground. You should see `LLM judge failed (AuthenticationError); used
   heuristic fallback.` and the key should appear nowhere on the page.
 
-## What visitors can verify
+## What visitors can do
 
-The dashboard is meant to show depth, not only that a demo works:
+- **Evaluate:** build a pipeline from the sample corpus or their own file,
+  upload their own pipeline's logged outputs, or score a single answer.
+- **Results and Compare:** fixed 0–1 charts, per-question regressions, and
+  an interactive regression gate.
+- **Inspect:** the claim-by-claim audit, ranked chunks marked relevant or
+  cited, and trace timings.
+- **Learn the metrics:** the formulas, with worked examples.
 
-- **Overview:** mean metrics per pipeline version.
-- **Compare versions:** aggregate deltas, plus which individual queries
-  regressed. The keyword retriever loses recall on the multi-relevant
-  question even though its MRR is unchanged.
-- **Inspect a run:** the generated answer, the claim-by-claim audit, the
-  ranked chunks marked relevant or cited, and the timed trace spans.
-- **Judge playground:** paste any chunks and answer to watch the judge audit
-  them live.
+See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for a full walkthrough.

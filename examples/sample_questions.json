@@ -1,0 +1,77 @@
+[
+  {
+    "query": "When was the Constitution of Nepal promulgated?",
+    "reference_chunk_ids": [
+      "art-001"
+    ]
+  },
+  {
+    "query": "What is the official language of Nepal?",
+    "reference_chunk_ids": [
+      "art-007"
+    ]
+  },
+  {
+    "query": "Does the constitution allow the death penalty?",
+    "reference_chunk_ids": [
+      "art-016"
+    ]
+  },
+  {
+    "query": "What right to information do citizens have?",
+    "reference_chunk_ids": [
+      "art-027"
+    ]
+  },
+  {
+    "query": "Is basic education free in Nepal?",
+    "reference_chunk_ids": [
+      "art-031"
+    ]
+  },
+  {
+    "query": "What health services must the State provide?",
+    "reference_chunk_ids": [
+      "art-035"
+    ]
+  },
+  {
+    "query": "How many provinces does Nepal have?",
+    "reference_chunk_ids": [
+      "prov-007",
+      "art-056"
+    ]
+  },
+  {
+    "query": "How many members are in the House of Representatives?",
+    "reference_chunk_ids": [
+      "art-084"
+    ]
+  },
+  {
+    "query": "Who appoints the Prime Minister?",
+    "reference_chunk_ids": [
+      "art-076"
+    ]
+  },
+  {
+    "query": "Which court has final authority to interpret the Constitution?",
+    "reference_chunk_ids": [
+      "art-128"
+    ]
+  },
+  {
+    "query": "What are the levels of government in Nepal?",
+    "reference_chunk_ids": [
+      "art-056",
+      "prov-007",
+      "local-753"
+    ]
+  },
+  {
+    "query": "What protections do children have?",
+    "reference_chunk_ids": [
+      "art-039"
+    ]
+  }
+]

@@ -142,6 +142,13 @@ The comparison reports mean deltas and lists the individual queries that
 regressed or improved. A flat mean can hide a regression on one question
 that another question's gain cancels out.
 
+Already logging your pipeline's outputs? Score the log directly, in the
+same format the dashboard's upload tab accepts:
+
+```bash
+anchor score outputs.jsonl --version prod-2026-10-11
+```
+
 Or run it from the command line. `my_rag:pipeline` is any function that
 takes a query and returns `(chunks, answer)`. Chunks can be `Chunk` objects
 or plain `{"id", "text"}` dicts:
@@ -166,17 +173,48 @@ Metrics: `faithfulness`, `recall`, `mrr`, `ndcg`, `map`. With the heuristic
 judge (no key), every number is deterministic, so the gate never flakes.
 See `.github/workflows/ci.yml` for a working example.
 
-## Live dashboard
+## The dashboard
 
-The Streamlit dashboard has four views. **Overview** shows per-version
-means. **Compare versions** shows deltas and per-query changes. **Inspect
-a run** shows the answer, the claim-by-claim audit, ranked chunks marked
-relevant or cited, and trace spans. **Judge playground** lets you paste
-chunks and an answer and watch the audit.
+```bash
+streamlit run dashboard/app.py
+```
 
-It can be hosted publicly with no key leakage. Visitors can paste their
-own Anthropic key for the session, and otherwise get the offline judge.
-See [DEPLOYMENT.md](DEPLOYMENT.md).
+You can run evaluations in the browser, not only view CLI runs:
+
+- **Evaluate** offers three ways in:
+  - **Build & run a pipeline.** Load a corpus (sample, upload, or paste),
+    edit the questions in a table, and pick a retriever (BM25, TF-IDF,
+    keyword or hybrid), k, a generator (extractive or Claude) and a judge.
+    Then run. One checkbox runs every retriever for a quick comparison.
+  - **Upload your pipeline's outputs.** Use a JSONL of the queries, ranked
+    chunks and answers your own system produced. Anchor scores them
+    without calling your pipeline.
+  - **Score a single answer.** Paste chunks and an answer to see the
+    metrics and the claim-by-claim audit.
+- **Results** shows per-version means on a fixed 0–1 axis, per-question
+  bars, every run, and CSV and JSON downloads.
+- **Compare** shows headline deltas, which questions regressed, and an
+  interactive regression gate that prints the matching `anchor gate`
+  command.
+- **Inspect** shows one run in full: the answer, each claim with the chunk
+  it cites, the ranked chunks marked relevant or cited, and timed trace
+  spans.
+- **Learn the metrics** gives every formula with a worked example.
+
+The dashboard can be hosted publicly with no key leakage. Visitors can
+paste their own Anthropic key for the session, and each one gets a private
+workspace. See [DEPLOYMENT.md](DEPLOYMENT.md).
+
+## Documentation
+
+- [User guide](docs/USER_GUIDE.md): dashboard walkthrough, CLI, Python
+  API, file formats, configuration
+- [Metrics](docs/METRICS.md): what each score measures, the formulas, and
+  worked examples
+- [Architecture](docs/ARCHITECTURE.md): modules, data model, design
+  decisions
+- [Deployment](DEPLOYMENT.md): secure public hosting on Streamlit
+  Community Cloud
 
 ## What's deliberately out of scope
 
@@ -196,12 +234,18 @@ anchor/
   retrieval_metrics.py  Recall@k, MRR, nDCG, MAP — pure functions
   judge.py              LLM faithfulness judge + offline heuristic fallback
   tracer.py             SQLite span/run storage (auto-upgrades older DBs)
-  runner.py             Orchestrates metrics + judge + tracing per case
+  runner.py             One evaluation path for pipelines and logged outputs
+  records.py            Load/validate logged outputs (JSON / JSONL / CSV)
+  sandbox.py            Built-in toy retrievers + generators for the dashboard
   compare.py            Diffs two pipeline versions, overall and per query
   gate.py               Pass/fail thresholds for CI
-  cli.py                `anchor demo | run | compare | gate`
-dashboard/app.py        Streamlit UI over the trace database
-examples/               Toy TF-IDF / keyword pipelines + 8-question sample dataset
-tests/                  Hand-computed metric values, judge, tracer, gate, dashboard
+  cli.py                `anchor demo | run | score | compare | gate`
+dashboard/
+  app.py                Streamlit entry point + navigation
+  views.py              Home, Evaluate, Results, Compare, Inspect, Learn
+  ui.py                 Styles, score cards, fixed 0–1 charts
+docs/                   User guide, metrics derivations, architecture
+examples/               Sample corpus, questions, logged records, toy pipelines
+tests/                  Metrics, judge, sandbox, records, gate, dashboard (60 tests, offline)
 DEPLOYMENT.md           Secure public deploy on Streamlit Community Cloud
 ```

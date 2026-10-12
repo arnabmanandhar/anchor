@@ -8,6 +8,9 @@ Commands:
                                  "module:function" — a function taking a
                                  query and returning (chunks, answer), or a
                                  zero-arg factory with --factory.
+    score RECORDS -v V           Score outputs your pipeline already produced
+                                 (JSON / JSONL / CSV of query, retrieved
+                                 chunks, answer, reference ids).
     compare V_A V_B              Compare two pipeline versions in the DB.
     gate V [--min-recall ...]    Exit non-zero if V misses a floor or drops
                                  too far below --baseline. For CI.
@@ -24,7 +27,8 @@ from pathlib import Path
 from .compare import compare_versions
 from .gate import GATE_METRICS, run_gate
 from .judge import FaithfulnessJudge
-from .runner import evaluate_pipeline, summarize
+from .records import load_records
+from .runner import evaluate_pipeline, evaluate_records, summarize
 from .tracer import Tracer
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
@@ -85,6 +89,13 @@ def main(argv=None) -> int:
     run_p.add_argument("--judge", choices=["auto", "llm", "heuristic"], default="auto")
     run_p.add_argument("--db", default="anchor_traces.db")
 
+    score_p = sub.add_parser("score", help="Score pre-computed pipeline outputs from a file")
+    score_p.add_argument("records", help="JSON / JSONL / CSV file of records (see anchor/records.py)")
+    score_p.add_argument("-v", "--version", required=True, help="pipeline_version label to store runs under")
+    score_p.add_argument("-k", type=int, default=5, help="cutoff for recall@k / nDCG@k (default 5)")
+    score_p.add_argument("--judge", choices=["auto", "llm", "heuristic"], default="auto")
+    score_p.add_argument("--db", default="anchor_traces.db")
+
     cmp_p = sub.add_parser("compare", help="Compare two pipeline versions")
     cmp_p.add_argument("version_a")
     cmp_p.add_argument("version_b")
@@ -108,6 +119,12 @@ def main(argv=None) -> int:
         pipeline_fn = _load_pipeline(args.pipeline, args.factory)
         judge = FaithfulnessJudge(backend=args.judge)
         results = evaluate_pipeline(pipeline_fn, dataset, pipeline_version=args.version, k=args.k, judge=judge, db_path=args.db)
+        print(json.dumps(summarize(results), indent=2))
+    elif args.command == "score":
+        path = Path(args.records)
+        records = load_records(path.read_bytes(), path.name)
+        judge = FaithfulnessJudge(backend=args.judge)
+        results = evaluate_records(records, pipeline_version=args.version, k=args.k, judge=judge, db_path=args.db)
         print(json.dumps(summarize(results), indent=2))
     elif args.command == "compare":
         print(json.dumps(compare_versions(args.db, args.version_a, args.version_b), indent=2))

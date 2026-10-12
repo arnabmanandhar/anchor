@@ -12,7 +12,8 @@ from .schema import Chunk, RunInput, JudgeVerdict, ClaimVerdict, RetrievalMetric
 from .retrieval_metrics import recall_at_k, mrr, ndcg_at_k, map_score, all_retrieval_metrics
 from .judge import FaithfulnessJudge
 from .tracer import Tracer, Span
-from .runner import evaluate_pipeline, summarize
+from .runner import evaluate_pipeline, evaluate_records, summarize
+from .records import load_records
 from .compare import compare_versions
 from .gate import run_gate, GateResult
 
@@ -32,10 +33,12 @@ __all__ = [
     "Tracer",
     "Span",
     "evaluate_pipeline",
+    "evaluate_records",
+    "load_records",
     "summarize",
     "compare_versions",
     "run_gate",
     "GateResult",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
