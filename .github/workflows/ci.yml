@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    # No ANTHROPIC_API_KEY on purpose: CI proves the whole pipeline runs
+    # offline with the heuristic judge, so every number here is reproducible.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - run: pytest -q
+      - name: Demo + regression gate
+        run: |
+          anchor demo
+          anchor compare demo-tfidf demo-keyword
+          anchor gate demo-tfidf --min-recall 1.0 --min-faithfulness 0.9

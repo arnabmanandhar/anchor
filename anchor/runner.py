@@ -46,6 +46,7 @@ def evaluate_pipeline(
 
         with tracer.span(run_id, "retrieval+generation") as s:
             retrieved_chunks, answer = pipeline_fn(query)
+            retrieved_chunks = [c if isinstance(c, Chunk) else Chunk(**c) for c in retrieved_chunks]
             s.metadata = {"num_chunks": len(retrieved_chunks)}
 
         retrieval_metrics = None
@@ -59,13 +60,16 @@ def evaluate_pipeline(
             s.metadata = {"backend": judge_verdict.judge_backend}
 
         latency_ms = (time.perf_counter() - t0) * 1000
-        # Rough cost estimate: only meaningful when the LLM judge backend was used.
-        cost_usd = 0.0015 if judge_verdict.judge_backend == "llm" else 0.0
+        # Judge cost from real token usage (0 for the heuristic backend).
+        cost_usd = judge.estimate_cost(judge_verdict)
 
         result = RunResult(
             run_id=run_id,
             pipeline_version=pipeline_version,
             query=query,
+            generated_answer=answer,
+            retrieved_chunks=retrieved_chunks,
+            reference_chunk_ids=case.get("reference_chunk_ids"),
             retrieval=retrieval_metrics,
             judge=judge_verdict,
             latency_ms=latency_ms,

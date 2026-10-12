@@ -1,6 +1,21 @@
+# Python
 __pycache__/
 *.pyc
 .pytest_cache/
-anchor_traces.db
 .venv/
 *.egg-info/
+build/
+dist/
+
+# Local trace data
+anchor_traces.db
+
+# Secrets: never commit these
+.env
+.env.*
+secrets.toml
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db

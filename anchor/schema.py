@@ -60,6 +60,10 @@ class JudgeVerdict(BaseModel):
     claims: List[ClaimVerdict] = Field(default_factory=list)
     reasoning: Optional[str] = None
     judge_backend: str = "heuristic"  # "llm" or "heuristic"
+    judge_model: Optional[str] = None
+    fallback_reason: Optional[str] = None  # set when the LLM judge failed and the heuristic ran instead
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class RetrievalMetrics(BaseModel):
@@ -76,6 +80,9 @@ class RunResult(BaseModel):
     run_id: str
     pipeline_version: str
     query: str
+    generated_answer: str = ""
+    retrieved_chunks: List[Chunk] = Field(default_factory=list)
+    reference_chunk_ids: Optional[List[str]] = None
     retrieval: Optional[RetrievalMetrics] = None
     judge: JudgeVerdict
     latency_ms: float

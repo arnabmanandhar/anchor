@@ -1,8 +1,4 @@
 import math
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from anchor.retrieval_metrics import recall_at_k, mrr, ndcg_at_k, map_score
 
@@ -53,3 +49,26 @@ def test_empty_relevant_set_returns_zero_not_error():
     assert mrr(["a"], set()) == 0.0
     assert ndcg_at_k(["a"], set(), k=3) == 0.0
     assert map_score(["a"], set()) == 0.0
+
+
+def test_ndcg_hand_computed_value():
+    # relevant {a, b}; ranking x, a, b at k=3
+    # DCG  = 0 + 1/log2(3) + 1/log2(4); IDCG = 1/log2(2) + 1/log2(3)
+    dcg = 1 / math.log2(3) + 1 / math.log2(4)
+    idcg = 1 + 1 / math.log2(3)
+    assert math.isclose(ndcg_at_k(["x", "a", "b"], {"a", "b"}, k=3), dcg / idcg)
+
+
+def test_ndcg_ideal_is_capped_at_k_when_more_relevant_than_k():
+    # 3 relevant docs, k=2, both slots hit -> perfect at this cutoff
+    assert ndcg_at_k(["a", "b"], {"a", "b", "c"}, k=2) == 1.0
+
+
+def test_recall_is_order_insensitive_within_k_but_mrr_is_not():
+    assert recall_at_k(["x", "a"], {"a"}, k=2) == recall_at_k(["a", "x"], {"a"}, k=2)
+    assert mrr(["x", "a"], {"a"}) < mrr(["a", "x"], {"a"})
+
+
+def test_map_penalises_missing_relevant_docs():
+    # only one of two relevant docs ever retrieved -> AP divided by 2
+    assert map_score(["a", "x"], {"a", "b"}) == 0.5

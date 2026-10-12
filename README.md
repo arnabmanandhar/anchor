@@ -72,30 +72,41 @@ your pipeline (any RAG system)
 ## Quickstart
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/arnabmanandhar/anchor.git
 cd anchor
 pip install -r requirements.txt
+pip install -e . --no-deps        # adds the `anchor` command
 
-# Runs a toy TF-IDF pipeline against a 5-question sample dataset.
-# Works with zero API keys (uses the heuristic judge fallback).
-python -m anchor.cli demo
+# Runs two toy pipelines (TF-IDF vs. a weaker keyword retriever) against an
+# 8-question sample dataset. Works with zero API keys (heuristic judge).
+anchor demo
 
-# View results in a dashboard
+# Which version is better, and on which questions?
+anchor compare demo-tfidf demo-keyword
+
+# View everything in the dashboard
 streamlit run dashboard/app.py
 ```
 
-Optional — use the real LLM-based faithfulness judge instead of the
-heuristic fallback:
+`python -m anchor <command>` works too if you skip the editable install.
+
+Optional: use the real LLM faithfulness judge instead of the heuristic
+fallback:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-python -m anchor.cli demo
+anchor demo
 ```
 
-Run the deterministic metrics test suite:
+The judge defaults to `claude-sonnet-5-5`. Set `ANCHOR_JUDGE_MODEL` to use
+a different model. It uses structured outputs, so the audit always parses,
+and any claim citing a chunk that wasn't actually retrieved is downgraded
+to unsupported.
+
+Run the test suite (no key needed; CI runs it the same way):
 
 ```bash
-pytest tests/ -v
+pytest -q
 ```
 
 ## Using it on your own pipeline
@@ -124,16 +135,56 @@ print(summarize(results))
 Then compare two versions once both have runs in the same database:
 
 ```bash
-python -m anchor.cli compare v2-bm25 v3-hybrid-retrieval
+anchor compare v2-bm25 v3-hybrid-retrieval
 ```
 
-## What's deliberately out of scope (v0.1)
+The comparison reports mean deltas and lists the individual queries that
+regressed or improved. A flat mean can hide a regression on one question
+that another question's gain cancels out.
+
+Or run it from the command line. `my_rag:pipeline` is any function that
+takes a query and returns `(chunks, answer)`. Chunks can be `Chunk` objects
+or plain `{"id", "text"}` dicts:
+
+```bash
+anchor run my_rag:pipeline eval_set.json --version v3-hybrid-retrieval -k 5
+```
+
+## Using it as a CI regression gate
+
+`anchor gate` exits non-zero when a version misses an absolute floor or
+drops too far below a baseline, so a pipeline change that makes retrieval
+worse fails the build:
+
+```bash
+anchor gate v3-hybrid-retrieval \
+  --min-recall 0.9 --min-faithfulness 0.8 \
+  --baseline v2-bm25 --max-mrr-drop 0.02 --max-faithfulness-drop 0.05
+```
+
+Metrics: `faithfulness`, `recall`, `mrr`, `ndcg`, `map`. With the heuristic
+judge (no key), every number is deterministic, so the gate never flakes.
+See `.github/workflows/ci.yml` for a working example.
+
+## Live dashboard
+
+The Streamlit dashboard has four views. **Overview** shows per-version
+means. **Compare versions** shows deltas and per-query changes. **Inspect
+a run** shows the answer, the claim-by-claim audit, ranked chunks marked
+relevant or cited, and trace spans. **Judge playground** lets you paste
+chunks and an answer and watch the audit.
+
+It can be hosted publicly with no key leakage. Visitors can paste their
+own Anthropic key for the session, and otherwise get the offline judge.
+See [DEPLOYMENT.md](DEPLOYMENT.md).
+
+## What's deliberately out of scope
 
 - No hosted service, no auth, no multi-tenant anything — this is a library
   + a local dashboard, on purpose, so it's auditable and cheap to run.
-- No generation-side cost/token accounting beyond a rough per-call
-  estimate — real token counts from your LLM provider would replace this
-  in a production version.
+- No generation-side cost accounting. The judge's own cost comes from
+  real token usage at list prices, but your pipeline's LLM calls aren't
+  metered.
 - The heuristic judge is intentionally crude (lexical overlap). It exists
   so the project runs with zero setup, not to replace the LLM judge.
 
@@ -144,11 +195,13 @@ anchor/
   schema.py             Pydantic models: Chunk, RunInput, JudgeVerdict, RunResult
   retrieval_metrics.py  Recall@k, MRR, nDCG, MAP — pure functions
   judge.py              LLM faithfulness judge + offline heuristic fallback
-  tracer.py             SQLite span/run storage
+  tracer.py             SQLite span/run storage (auto-upgrades older DBs)
   runner.py             Orchestrates metrics + judge + tracing per case
-  compare.py            Diffs two pipeline_version labels
-  cli.py                `python -m anchor.cli demo|compare`
+  compare.py            Diffs two pipeline versions, overall and per query
+  gate.py               Pass/fail thresholds for CI
+  cli.py                `anchor demo | run | compare | gate`
 dashboard/app.py        Streamlit UI over the trace database
-examples/                Toy TF-IDF pipeline + 5-question sample dataset
-tests/test_metrics.py    Hand-computed expected values for every metric
+examples/               Toy TF-IDF / keyword pipelines + 8-question sample dataset
+tests/                  Hand-computed metric values, judge, tracer, gate, dashboard
+DEPLOYMENT.md           Secure public deploy on Streamlit Community Cloud
 ```

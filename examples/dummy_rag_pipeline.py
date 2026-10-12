@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import List, Tuple
 
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from anchor.schema import Chunk
@@ -28,14 +28,23 @@ CORPUS = [
 ]
 
 
-def make_pipeline(top_k: int = 3):
+def make_pipeline(top_k: int = 3, retriever: str = "tfidf"):
+    """retriever="tfidf" is the baseline. retriever="keyword" is a deliberately
+    weaker variant (raw word counts, no IDF weighting), so `anchor demo` has
+    two versions to compare and shows what a retrieval regression looks like."""
     ids, texts = zip(*CORPUS)
-    vectorizer = TfidfVectorizer().fit(texts)
+    if retriever == "tfidf":
+        vectorizer = TfidfVectorizer().fit(texts)
+    elif retriever == "keyword":
+        vectorizer = CountVectorizer(binary=True).fit(texts)
+    else:
+        raise ValueError(f"unknown retriever {retriever!r}")
     matrix = vectorizer.transform(texts)
 
     def pipeline(query: str) -> Tuple[List[Chunk], str]:
         q_vec = vectorizer.transform([query])
         sims = cosine_similarity(q_vec, matrix)[0]
+        # Ties broken by corpus order so the demo is fully deterministic.
         ranked = sorted(zip(ids, texts, sims), key=lambda x: -x[2])[:top_k]
 
         chunks = [Chunk(id=i, text=t, score=float(s)) for i, t, s in ranked]
