@@ -16,9 +16,11 @@ Storage: by default runs go to anchor_traces.db in the repo root, shared
 with the CLI. With ANCHOR_PUBLIC=1 (public deploys) every browser session
 gets its own private database, seeded with the demo.
 
-API keys (see DEPLOYMENT.md): a key pasted in the sidebar lives only in
-that session; otherwise the server's ANTHROPIC_API_KEY, capped per session;
-otherwise everything runs offline. Keys never reach the database or page.
+Models (see connections.py and DEPLOYMENT.md): each browser session can add
+several provider/model/key connections in the sidebar; they live only in
+that session's memory and expire when idle. The owner's key, if configured,
+is offered as a capped built-in model. With no model, everything runs
+offline. Keys never reach the database, logs or page.
 """
 
 import sys

@@ -30,7 +30,7 @@ def workspace(tmp_path, monkeypatch):
 def test_every_page_renders_offline(name):
     at = page(name).run()
     assert not at.exception, [e.value for e in at.exception]
-    assert any("offline" in i.value for i in at.sidebar.info)
+    assert any("runs offline" in c.value for c in at.sidebar.caption)
 
 
 def test_empty_workspace_is_seeded_with_demo(workspace):
@@ -66,7 +66,6 @@ def test_single_answer_catches_the_hallucinated_claim():
 
 def test_score_charts_use_fixed_unit_domain():
     import pandas as pd
-
     import ui
 
     means = pd.DataFrame({"faithfulness": [0.6], "recall_at_k": [0.6]}, index=pd.Index(["v1"], name="pipeline_version"))
@@ -74,26 +73,63 @@ def test_score_charts_use_fixed_unit_domain():
     assert spec["encoding"]["y"]["scale"]["domain"] == [0, 1]
 
 
-def test_pasted_key_is_never_rendered(monkeypatch):
-    import anchor.judge as judge_mod
+def add_model(at, provider="groq", key="gsk_dashboard-test-key-000"):
+    at.sidebar.selectbox(key="conn_form_provider").select(provider).run()
+    at.sidebar.text_input(key="conn_form_key").input(key)
+    next(b for b in at.sidebar.button if b.label == "Add model").click().run()
+    return at
 
-    secret = "sk-ant-dashboard-test-key"
 
-    def boom(self, *a, **k):
-        raise RuntimeError(f"auth failed for {secret}")
+def test_pasted_key_is_never_rendered_or_stored(monkeypatch, workspace):
+    import anchor.llm as llm
 
-    monkeypatch.setattr(judge_mod.FaithfulnessJudge, "_score_llm", boom)
-    at = page("evaluate").run()
-    at.sidebar.text_input[0].input(secret).run()
-    at.selectbox(key="single_judge").select("LLM (Claude)").run()
+    secret = "gsk_dashboard-test-key-000"
+
+    def reject(url, headers, payload, s):
+        raise llm.LLMError("auth", llm.redact(f"invalid api key {secret}", s), 401)
+
+    monkeypatch.setattr(llm, "_post", reject)
+    at = add_model(page("evaluate").run(), key=secret)
+    assert not at.exception
+    assert at.session_state["conn_form_key"] in ("", None)  # the form cleared the raw key
+    assert any("Groq" in m.value for m in at.sidebar.markdown)
     next(b for b in at.button if b.label == "Score").click().run()
     rendered = " ".join(
         str(el.value)
-        for group in (at.markdown, at.caption, at.sidebar.caption, at.info, at.success, at.sidebar.success)
+        for group in (at.markdown, at.caption, at.sidebar.caption, at.sidebar.markdown, at.info, at.success,
+                      at.error, at.warning, at.sidebar.success, at.sidebar.error)
         for el in group
     )
     assert secret not in rendered
-    assert "LLM judge failed (RuntimeError)" in rendered
+    assert "LLM judge failed (auth)" in rendered
+    assert secret.encode() not in workspace.read_bytes()
+
+
+def test_connections_are_per_session_and_can_be_forgotten():
+    at = add_model(page("evaluate").run())
+    assert at.selectbox(key="build_judge").value is not None  # a new connection becomes the default
+    other = page("evaluate").run()  # a different browser session
+    assert any("runs offline" in c.value for c in other.sidebar.caption)
+    next(b for b in at.sidebar.button if b.label == "Forget all keys").click().run()
+    assert any("runs offline" in c.value for c in at.sidebar.caption)
+
+
+def test_public_mode_blocks_private_custom_endpoints(monkeypatch):
+    monkeypatch.setenv("ANCHOR_PUBLIC", "1")
+    at = page("evaluate").run()
+    at.sidebar.selectbox(key="conn_form_provider").select("custom").run()
+    at.sidebar.text_input(key="conn_form_base").input("http://169.254.169.254/latest")
+    next(b for b in at.sidebar.button if b.label == "Add model").click().run()
+    assert any("blocked" in e.value for e in at.sidebar.error)
+
+
+def test_owner_key_is_capped_and_never_shown(monkeypatch):
+    owner = "gsk_owner-secret-key-0000"
+    monkeypatch.setenv("GROQ_API_KEY", owner)
+    monkeypatch.setenv("ANCHOR_SERVER_KEY_SESSION_LIMIT", "3")
+    at = page("evaluate").run()
+    text = " ".join(str(el.value) for el in (*at.sidebar.markdown, *at.sidebar.caption))
+    assert "Built in" in text and "3 calls left" in text and owner not in text and "0000" not in text
 
 
 def test_public_mode_gives_each_session_a_private_workspace(workspace, monkeypatch):

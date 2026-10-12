@@ -10,33 +10,35 @@ regression on one query that another query's improvement cancels out.
 from __future__ import annotations
 
 import json
-from typing import Dict, List, Optional
+from typing import Optional
 
 from .stats import paired_test
 from .tracer import Tracer
 
-METRIC_KEYS = ("mean_faithfulness", "mean_recall_at_k", "mean_mrr", "mean_ndcg_at_k", "mean_map", "mean_latency_ms")
+METRIC_KEYS = ("mean_faithfulness", "mean_recall_at_k", "mean_precision_at_k", "hit_rate_at_k", "mean_mrr",
+               "mean_ndcg_at_k", "mean_map", "mean_latency_ms")
 
 # Per-query metrics used to flag regressions/improvements. Latency is left
 # out on purpose: it is noisy run to run and would flag every query.
-_PER_QUERY_KEYS = ("faithfulness", "recall_at_k", "mrr", "ndcg_at_k", "map_score")
+_PER_QUERY_KEYS = ("faithfulness", "recall_at_k", "precision_at_k", "hit_at_k", "mrr", "ndcg_at_k", "map_score")
+_RETRIEVAL_KEYS = _PER_QUERY_KEYS[1:]
 
 
-def _mean(vals: List[float]) -> Optional[float]:
+def _mean(vals: list[float]) -> Optional[float]:
     vals = [v for v in vals if v is not None]
     return sum(vals) / len(vals) if vals else None
 
 
-def _run_metrics(run: Dict) -> Dict[str, Optional[float]]:
+def _run_metrics(run: dict) -> dict[str, Optional[float]]:
     retrieval = json.loads(run["retrieval_json"]) if run["retrieval_json"] else None
     out = {"faithfulness": json.loads(run["judge_json"])["faithfulness_score"]}
-    for key in ("recall_at_k", "mrr", "ndcg_at_k", "map_score"):
-        out[key] = retrieval[key] if retrieval else None
+    for key in _RETRIEVAL_KEYS:
+        out[key] = retrieval.get(key) if retrieval else None  # .get: older traces lack precision/hit
     out["latency_ms"] = run["latency_ms"]
     return out
 
 
-def summarize_runs(runs: List[Dict]) -> Dict:
+def summarize_runs(runs: list[dict]) -> dict:
     if not runs:
         return {"n_runs": 0}
     metrics = [_run_metrics(r) for r in runs]
@@ -44,6 +46,8 @@ def summarize_runs(runs: List[Dict]) -> Dict:
         "n_runs": len(runs),
         "mean_faithfulness": _mean([m["faithfulness"] for m in metrics]),
         "mean_recall_at_k": _mean([m["recall_at_k"] for m in metrics]),
+        "mean_precision_at_k": _mean([m["precision_at_k"] for m in metrics]),
+        "hit_rate_at_k": _mean([m["hit_at_k"] for m in metrics]),
         "mean_mrr": _mean([m["mrr"] for m in metrics]),
         "mean_ndcg_at_k": _mean([m["ndcg_at_k"] for m in metrics]),
         "mean_map": _mean([m["map_score"] for m in metrics]),
@@ -51,7 +55,7 @@ def summarize_runs(runs: List[Dict]) -> Dict:
     }
 
 
-def per_query_diff(runs_a: List[Dict], runs_b: List[Dict], tolerance: float = 1e-9) -> List[Dict]:
+def per_query_diff(runs_a: list[dict], runs_b: list[dict], tolerance: float = 1e-9) -> list[dict]:
     """Match runs by query text (the latest run per query wins, so re-runs
     don't double count) and report the change in each metric."""
     latest_a = {r["query"]: _run_metrics(r) for r in runs_a}
@@ -77,7 +81,7 @@ def per_query_diff(runs_a: List[Dict], runs_b: List[Dict], tolerance: float = 1e
     return rows
 
 
-def significance(runs_a: List[Dict], runs_b: List[Dict], alpha: float = 0.05) -> Dict[str, Dict]:
+def significance(runs_a: list[dict], runs_b: list[dict], alpha: float = 0.05) -> dict[str, dict]:
     """Paired significance test per metric over the questions both versions
     answered (latest run per query, as in per_query_diff). Keyed like
     _PER_QUERY_KEYS; see stats.paired_test for the fields."""
@@ -90,7 +94,7 @@ def significance(runs_a: List[Dict], runs_b: List[Dict], alpha: float = 0.05) ->
     }
 
 
-def compare_versions(db_path: str, version_a: str, version_b: str, alpha: float = 0.05) -> Dict:
+def compare_versions(db_path: str, version_a: str, version_b: str, alpha: float = 0.05) -> dict:
     tracer = Tracer(db_path)
     runs_a = tracer.fetch_runs(version_a)
     runs_b = tracer.fetch_runs(version_b)

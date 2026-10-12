@@ -5,14 +5,29 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "ruff>=0.6"
+      - run: ruff check .
+
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
-    # No ANTHROPIC_API_KEY on purpose: CI proves the whole pipeline runs
-    # offline with the heuristic judge, so every number here is reproducible.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    # No provider keys on purpose: CI proves the whole pipeline runs offline
+    # with the heuristic judge, so every number here is reproducible. Model
+    # calls are tested against a stubbed HTTP layer.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,8 +37,10 @@ jobs:
       - run: pip install -r requirements.txt
       - run: pip install -e . --no-deps
       - run: pytest -q
-      - name: Demo + regression gate
+      - name: Demo, significance and regression gate
         run: |
           anchor demo
           anchor compare demo-tfidf demo-keyword
           anchor gate demo-tfidf --min-recall 1.0 --min-faithfulness 0.9
+          anchor gate demo-keyword --baseline demo-tfidf --max-recall-drop 0.0 --require-significant
+          anchor synth examples/sample_corpus.json -n 10 -o /tmp/questions.json

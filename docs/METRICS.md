@@ -43,6 +43,27 @@ relevant chunks are found, so Recall@5 = **1.00**.
 **Use it when** the generator reads all $k$ chunks equally, so what matters
 is whether the evidence is in the context at all.
 
+### Precision@k and Hit@k: how clean is the context, and did anything land?
+
+$$
+\text{Precision@}k = \frac{|\,\text{top-}k \cap R\,|}{k}
+\qquad
+\text{Hit@}k = \begin{cases}1 & \text{if } \text{top-}k \cap R \neq \varnothing\\ 0 & \text{otherwise}\end{cases}
+$$
+
+Precision@k is the share of the $k$ slots spent on relevant chunks. The
+denominator is $k$ even when fewer than $k$ chunks come back, so returning
+less isn't rewarded. Every irrelevant chunk is noise the generator has to
+ignore, so precision tracks how distracting the context is. Hit@k asks
+only whether *anything* relevant made it in; its mean over questions is
+the hit rate.
+
+*Example:* top 3 `x, a, y` with $R$ = {a, b}: Precision@3 = 1/3 = **0.33**,
+Hit@3 = **1**.
+
+All retrieval metrics count a chunk id once, at its first position, so a
+retriever that returns the same chunk twice can't inflate its scores.
+
 ### MRR: how soon does the first relevant chunk appear?
 
 $$
@@ -133,15 +154,27 @@ citation can't inflate the score.
 
 | | LLM judge | Heuristic judge |
 |---|---|---|
-| Needs | An Anthropic API key | Nothing |
+| Needs | A key for any supported provider, or a local model | Nothing |
 | Claims | Atomic facts extracted by the model | Sentences of the answer |
-| Support test | The model reads the chunk | Word overlap ≥ 0.5 (below) |
+| Verdicts | supported, contradicted, unsupported | supported, contradicted (numbers differ), unsupported |
+| Support test | The model reads the chunk | Word overlap ≥ 0.6 and no unseen numbers (below) |
 | Catches paraphrase | Yes | No |
-| Deterministic | Nearly (structured output) | Exactly |
-| Cost | Real token usage, shown per run | Free |
+| Deterministic | Nearly (structured output; cached verdicts repeat exactly) | Exactly |
+| Cost | Real token usage, recorded per run | Free |
+
+The LLM judge's three-way verdict matters: an answer that says "nine
+provinces" when the chunk says seven is *contradicted*, which is worse
+than a claim the context simply doesn't mention. Both count as unfaithful
+in the score, and the contradiction rate is reported separately.
+
+Verdicts are cached by a hash of the judge prompt version, model, query,
+chunks and answer (never the key), so re-scoring an unchanged answer is
+free and gives the same verdict. Changing the model or the prompt
+invalidates the cache.
 
 **The heuristic, exactly.** Let $C$ be the set of content words in a claim
-sentence (lower-cased, stop-words removed) and $D$ the content words of a
+sentence (lower-cased, stop-words removed, plurals and simple verb endings
+stripped so "provinces" matches "province") and $D$ the content words of a
 chunk. The claim's support from that chunk is the share of the claim's
 words the chunk covers:
 
@@ -149,16 +182,24 @@ $$
 \text{overlap}(C, D) = \frac{|C \cap D|}{|C|}
 $$
 
-A claim is supported if some retrieved chunk reaches overlap ≥ 0.5, and the
-chunk with the highest overlap is the one cited. The measure is
+A claim is supported if some retrieved chunk reaches overlap ≥ 0.6 and
+every number in the claim also appears in that chunk ("seven" and "7"
+count as the same). The chunk with the highest overlap is the one cited.
+If the best chunk is on topic (overlap ≥ 0.3) but shares none of the
+claim's numbers, the claim is *contradicted*. The measure is
 asymmetric on purpose: a long chunk isn't penalized for containing more
 than the claim needs.
 
 *Example:* the claim "Each province elects a governor." has content words
-$C$ = {each, province, elects, governor}. The chunk "Nepal is divided into
-seven provinces, each with its own provincial assembly…" shares only
-"each". "province" ≠ "provinces", because there is no stemming. Overlap is
-1/4 = 0.25 < 0.5, so the claim is **unsupported**.
+$C$ = {each, province, elect, governor}. The chunk "Nepal is divided into
+seven provinces, each with its own provincial assembly…" covers "each" and
+"province". Overlap is 2/4 = 0.5 < 0.6, so the claim is **unsupported**.
+"Nepal has nine provinces." would be **contradicted**: on topic, but the
+chunk says 7, not 9.
+
+An answer with no claims scores 0, unless it is an explicit abstention
+("I don't know", "not mentioned in the context"), which scores 1: refusing
+to guess is faithful.
 
 The heuristic is deliberately crude. Its job is to make the whole pipeline
 run offline and for free, for CI and first-time users, not to replace the
@@ -247,8 +288,11 @@ timed spans:
 - `faithfulness_judge` is the judge call. Its metadata records which
   backend ran.
 
-The judge's cost is computed from the token counts the API reports, at
-list prices. Your pipeline's own LLM calls are not metered.
+The judge records the input and output token counts the provider
+reports, per run. Prices differ by provider and change often, so a dollar
+cost is shown only when you give the connection a price
+(`Connection(..., price_per_mtok=(input, output))`); free tiers and local
+models cost nothing. Your pipeline's own LLM calls are not metered.
 
 ## The regression gate
 

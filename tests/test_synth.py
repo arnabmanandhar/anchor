@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
+import anchor.synth as synth
 from anchor.cli import main
 from anchor.sandbox import parse_corpus, parse_dataset, tokenize
-import anchor.synth as synth
 from anchor.synth import cloze_questions, difficulty, generate_questions
 
 CORPUS = Path(__file__).resolve().parent.parent / "examples" / "sample_corpus.json"
@@ -84,13 +84,15 @@ def test_difficulty_labels_and_drop_easy(chunks):
 def test_llm_generator_flow_without_network(chunks, monkeypatch):
     calls = []
 
-    def fake(kind, context, api_key, model):
+    def fake(kind, context, connection):
         calls.append(kind)
         return {"query": f"natural {kind} question {len(calls)} about {context[0].id}",
                 "reference_answer": None if kind == "unanswerable" else "x", "rule": "llm"}
 
     monkeypatch.setattr(synth, "_llm_question", fake)
-    qs = generate_questions(chunks, n=5, generator="llm", api_key="test-key")
+    from anchor.llm import Connection, Secret
+
+    qs = generate_questions(chunks, n=5, generator="llm", connection=Connection("groq", "m", Secret("gsk_test-key-0000")))
     assert len(qs) == 5 and all(q["generator"] == "llm" for q in qs)
     assert len(calls) <= 10  # attempts are capped at twice the quota
     with pytest.raises(ValueError):

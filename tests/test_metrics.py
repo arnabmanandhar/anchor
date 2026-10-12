@@ -1,6 +1,8 @@
 import math
 
-from anchor.retrieval_metrics import recall_at_k, mrr, ndcg_at_k, map_score
+import pytest
+
+from anchor.retrieval_metrics import map_score, mrr, ndcg_at_k, recall_at_k
 
 
 def test_recall_at_k_full_hit():
@@ -72,3 +74,21 @@ def test_recall_is_order_insensitive_within_k_but_mrr_is_not():
 def test_map_penalises_missing_relevant_docs():
     # only one of two relevant docs ever retrieved -> AP divided by 2
     assert map_score(["a", "x"], {"a", "b"}) == 0.5
+
+
+def test_precision_and_hit_at_k():
+    from anchor.retrieval_metrics import hit_at_k, precision_at_k
+
+    ranking, relevant = ["x", "a", "y", "b", "z"], {"a", "b"}
+    assert precision_at_k(ranking, relevant, 3) == pytest.approx(1 / 3)
+    assert precision_at_k(ranking, relevant, 5) == pytest.approx(2 / 5)
+    assert hit_at_k(ranking, relevant, 1) == 0.0 and hit_at_k(ranking, relevant, 2) == 1.0
+
+
+def test_duplicate_ids_count_once():
+    from anchor.retrieval_metrics import map_score, ndcg_at_k, precision_at_k
+
+    dup = ["a", "a", "a", "b"]
+    assert ndcg_at_k(dup, {"a"}, 4) == 1.0
+    assert map_score(dup, {"a"}) == 1.0
+    assert precision_at_k(dup, {"a"}, 2) == 0.5

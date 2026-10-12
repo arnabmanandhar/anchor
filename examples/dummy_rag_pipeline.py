@@ -9,8 +9,6 @@ contract, never to this file.
 
 from __future__ import annotations
 
-from typing import List, Tuple
-
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -41,7 +39,7 @@ def make_pipeline(top_k: int = 3, retriever: str = "tfidf"):
         raise ValueError(f"unknown retriever {retriever!r}")
     matrix = vectorizer.transform(texts)
 
-    def pipeline(query: str) -> Tuple[List[Chunk], str]:
+    def pipeline(query: str) -> tuple[list[Chunk], str]:
         q_vec = vectorizer.transform([query])
         sims = cosine_similarity(q_vec, matrix)[0]
         # Ties broken by corpus order so the demo is fully deterministic.

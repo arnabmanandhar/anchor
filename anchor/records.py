@@ -27,7 +27,6 @@ from __future__ import annotations
 import csv
 import io
 import json
-from typing import Dict, List
 
 from .sandbox import parse_reference_ids
 
@@ -36,14 +35,14 @@ _ANSWER_KEYS = ("answer", "generated_answer", "response", "output")
 _REF_KEYS = ("reference_chunk_ids", "relevant_ids", "ground_truth_ids", "reference_ids")
 
 
-def _first(record: Dict, keys, default=None):
+def _first(record: dict, keys, default=None):
     for key in keys:
         if key in record and record[key] is not None:
             return record[key]
     return default
 
 
-def normalize_record(record: Dict, index: int = 1) -> Dict:
+def normalize_record(record: dict, index: int = 1) -> dict:
     """Return {query, retrieved_chunks, answer, reference_chunk_ids} or raise
     ValueError naming the record number and what is wrong with it."""
     where = f"record {index}"
@@ -75,7 +74,7 @@ def normalize_record(record: Dict, index: int = 1) -> Dict:
     }
 
 
-def load_records(data: bytes | str, filename: str = "records.jsonl") -> List[Dict]:
+def load_records(data: bytes | str, filename: str = "records.jsonl") -> list[dict]:
     """Parse a JSON list, JSONL, or CSV file of records and validate every row.
     In CSV, retrieved_chunks must be a JSON array string in its column."""
     text = data.decode("utf-8-sig") if isinstance(data, bytes) else data

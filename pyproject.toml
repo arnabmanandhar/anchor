@@ -4,18 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anchor-rag-eval"
-version = "0.5.0"
-description = "A deterministic-first evaluation and tracing layer for RAG pipelines."
+version = "0.6.0"
+description = "A deterministic-first evaluation and tracing layer for RAG pipelines, with any LLM provider."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Arnab Manandhar" }]
 dependencies = ["pydantic>=2.0"]
 
+keywords = ["rag", "evaluation", "llm", "retrieval", "faithfulness", "hallucination", "observability"]
+
 [project.optional-dependencies]
-llm = ["anthropic>=1.0"]
 dashboard = ["streamlit>=1.50", "pandas>=2.0"]
 examples = ["scikit-learn>=1.3"]
-dev = ["pytest>=7.4", "anchor-rag-eval[llm,dashboard,examples]"]
+dev = ["pytest>=7.4", "ruff>=0.6", "anchor-rag-eval[dashboard,examples]"]
 
 [project.urls]
 Repository = "https://github.com/arnabmanandhar/anchor"
@@ -28,3 +29,22 @@ packages = ["anchor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 125
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "S", "UP"]
+ignore = [
+  "E501",  # long lines are allowed where they read better
+  "S101",  # assert is how tests check things
+  "S311",  # random is used for seeded statistics, not security
+  "B008",
+  "B905",  # zip() over same-length sequences by construction
+  "UP007", "UP045",  # keep Optional[...] style used throughout
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B"]
+"examples/*" = ["S"]

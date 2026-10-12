@@ -18,7 +18,9 @@ Retrievers (all pure Python, deterministic, ties broken by corpus order):
 Generators:
   - "extractive"  picks the chunk sentences that best overlap the query;
                   offline, free, faithful by construction (useful baseline)
-  - "llm"         asks Claude to answer from the chunks (needs an API key)
+  - "llm"         asks a language model to answer from the chunks, through
+                  any connection anchor.llm supports (needs that provider's key,
+                  or a local server)
 """
 
 from __future__ import annotations
@@ -29,9 +31,11 @@ import json
 import math
 import re
 from collections import Counter
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Callable, Sequence
+from typing import Optional
 
-from .judge import DEFAULT_MODEL, split_sentences
+from . import llm
+from .judge import split_sentences
 from .schema import Chunk
 
 RETRIEVERS = ("bm25", "tfidf", "keyword", "hybrid")
@@ -44,7 +48,7 @@ _STOP = {
 }
 
 
-def tokenize(text: str, drop_stopwords: bool = True) -> List[str]:
+def tokenize(text: str, drop_stopwords: bool = True) -> list[str]:
     tokens = re.findall(r"[a-z0-9]+", text.lower())
     return [t for t in tokens if t not in _STOP] if drop_stopwords else tokens
 
@@ -52,7 +56,7 @@ def tokenize(text: str, drop_stopwords: bool = True) -> List[str]:
 # ------------------------------------------------------------------ corpus
 
 
-def parse_corpus(data: bytes | str, filename: str = "corpus.txt") -> List[Chunk]:
+def parse_corpus(data: bytes | str, filename: str = "corpus.txt") -> list[Chunk]:
     """Accepts CSV (id,text columns), JSON (list of {id,text} or strings),
     JSONL (one {id,text} per line), or plain text (chunks separated by blank
     lines; ids become c1, c2, ...)."""
@@ -104,7 +108,7 @@ class _Index:
         # Smoothed IDF (as in scikit-learn) for TF-IDF; BM25 uses its own below.
         self.idf = {t: math.log((1 + self.n) / (1 + f)) + 1 for t, f in df.items()}
 
-    def bm25(self, query: str, k1: float = 1.5, b: float = 0.75) -> List[float]:
+    def bm25(self, query: str, k1: float = 1.5, b: float = 0.75) -> list[float]:
         q = tokenize(query)
         scores = []
         for tf, doc in zip(self.tf, self.docs):
@@ -118,7 +122,7 @@ class _Index:
             scores.append(s)
         return scores
 
-    def tfidf(self, query: str) -> List[float]:
+    def tfidf(self, query: str) -> list[float]:
         qtf = Counter(tokenize(query))
         qvec = {t: f * self.idf.get(t, 0.0) for t, f in qtf.items()}
         qnorm = math.sqrt(sum(v * v for v in qvec.values()))
@@ -130,22 +134,22 @@ class _Index:
             scores.append(dot / (qnorm * dnorm) if qnorm and dnorm else 0.0)
         return scores
 
-    def keyword(self, query: str) -> List[float]:
+    def keyword(self, query: str) -> list[float]:
         q = set(tokenize(query, drop_stopwords=False))
         return [float(len(q & set(tokenize(c.text, drop_stopwords=False)))) for c in self.chunks]
 
 
-def _rank(scores: List[float]) -> List[int]:
+def _rank(scores: list[float]) -> list[int]:
     # Stable sort: equal scores keep corpus order, so results are reproducible.
     return sorted(range(len(scores)), key=lambda i: -scores[i])
 
 
-def make_retriever(chunks: Sequence[Chunk], method: str = "bm25", top_k: int = 3) -> Callable[[str], List[Chunk]]:
+def make_retriever(chunks: Sequence[Chunk], method: str = "bm25", top_k: int = 3) -> Callable[[str], list[Chunk]]:
     if method not in RETRIEVERS:
         raise ValueError(f"unknown retriever {method!r}; choose from {RETRIEVERS}")
     index = _Index(chunks)
 
-    def retrieve(query: str) -> List[Chunk]:
+    def retrieve(query: str) -> list[Chunk]:
         if method == "hybrid":
             # Reciprocal-rank fusion: score = sum over rankers of 1 / (60 + rank).
             fused = [0.0] * index.n
@@ -187,21 +191,9 @@ _GEN_SYSTEM = (
 )
 
 
-def llm_answer(query: str, chunks: Sequence[Chunk], api_key: str, model: Optional[str] = None) -> str:
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=api_key)
+def llm_answer(query: str, chunks: Sequence[Chunk], connection: llm.Connection) -> str:
     context = "\n".join(f"[{c.id}] {c.text}" for c in chunks)
-    resp = client.messages.create(
-        model=model or DEFAULT_MODEL,
-        max_tokens=16000,
-        system=_GEN_SYSTEM,
-        output_config={"effort": "low"},
-        messages=[{"role": "user", "content": f"CONTEXT:\n{context}\n\nQUESTION: {query}"}],
-    )
-    if resp.stop_reason == "refusal":
-        raise RuntimeError("generation request was refused")
-    return "".join(b.text for b in resp.content if b.type == "text").strip()
+    return llm.complete_text(connection, _GEN_SYSTEM, f"CONTEXT:\n{context}\n\nQUESTION: {query}", max_tokens=2048).text
 
 
 def make_pipeline(
@@ -209,26 +201,25 @@ def make_pipeline(
     retriever: str = "bm25",
     top_k: int = 3,
     generator: str = "extractive",
-    api_key: Optional[str] = None,
-    model: Optional[str] = None,
-) -> Callable[[str], Tuple[List[Chunk], str]]:
+    connection: Optional[llm.Connection] = None,
+) -> Callable[[str], tuple[list[Chunk], str]]:
     """Build a pipeline function in the shape evaluate_pipeline expects."""
     if generator not in GENERATORS:
         raise ValueError(f"unknown generator {generator!r}; choose from {GENERATORS}")
-    if generator == "llm" and not api_key:
-        raise ValueError("the llm generator needs an API key")
+    if generator == "llm" and connection is None:
+        raise ValueError("the llm generator needs a model connection")
     retrieve = make_retriever(chunks, retriever, top_k)
 
     def pipeline(query: str):
         retrieved = retrieve(query)
         if generator == "llm":
-            return retrieved, llm_answer(query, retrieved, api_key, model)
+            return retrieved, llm_answer(query, retrieved, connection)
         return retrieved, extractive_answer(query, retrieved)
 
     return pipeline
 
 
-def parse_reference_ids(value) -> Optional[List[str]]:
+def parse_reference_ids(value) -> Optional[list[str]]:
     """'c1, c3' / ['c1','c3'] / None -> ['c1','c3'] or None."""
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return None
@@ -240,7 +231,7 @@ def parse_reference_ids(value) -> Optional[List[str]]:
     return ids or None
 
 
-def parse_dataset(data: bytes | str, filename: str = "dataset.json") -> List[Dict]:
+def parse_dataset(data: bytes | str, filename: str = "dataset.json") -> list[dict]:
     """Questions file: JSON list / JSONL of {query, reference_chunk_ids?}, or
     CSV with 'query' and optional 'reference_chunk_ids' (comma separated)."""
     text = data.decode("utf-8-sig") if isinstance(data, bytes) else data

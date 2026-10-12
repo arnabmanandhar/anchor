@@ -55,11 +55,14 @@ retrievers find them easily and almost all are labelled *easy*. Use them
 for smoke tests, CI and learning the tool, not as a stand-in for real user
 questions.
 
-### Claude
+### LLM
 
-Claude gets the chunk (or the pair, or a sample of the corpus for
-unanswerable questions) and writes a question the way a user would, without
-copying phrases. Structured outputs guarantee a `{question, answer}` shape.
+Any connected model (any provider in `anchor providers`, or a local one)
+gets the chunk (or the pair, or a sample of the corpus for unanswerable
+questions) and writes a question the way a user would, without copying
+phrases. The reply is requested as schema-constrained JSON where the
+provider supports it and validated either way, so it always has a
+`{question, answer}` shape; an invalid reply gets one repair attempt.
 These questions differ in wording from the source, so they actually test
 retrieval. Each candidate is one API call, and attempts are capped at twice
 the number requested.

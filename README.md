@@ -25,9 +25,12 @@ Every run — retrieval, generation, judging — is captured as a **trace**
 past run and see exactly what happened, and diff two pipeline versions
 side by side before you ship either one.
 
-No API key required to try it: if `ANTHROPIC_API_KEY` isn't set, the
-faithfulness judge falls back to a lexical-overlap heuristic so the whole
-pipeline still runs end-to-end, offline, for free.
+No API key required to try it: with no key set, the faithfulness judge
+falls back to a lexical heuristic so the whole pipeline still runs
+end-to-end, offline, for free. When you do want an LLM, bring any
+provider: Google Gemini, Groq, OpenRouter, Hugging Face, Mistral, OpenAI,
+xAI Grok, Anthropic, or a local OpenAI-compatible server such as Ollama.
+Several have free tiers that are plenty for evaluation.
 
 ---
 
@@ -90,18 +93,39 @@ streamlit run dashboard/app.py
 
 `python -m anchor <command>` works too if you skip the editable install.
 
-Optional: use the real LLM faithfulness judge instead of the heuristic
-fallback:
+Optional: use an LLM faithfulness judge instead of the heuristic. Set
+the key of whichever provider you use; the free Gemini tier is the
+default recommendation:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+export GEMINI_API_KEY=...          # or GROQ_API_KEY, OPENROUTER_API_KEY, HF_TOKEN,
+                                   # MISTRAL_API_KEY, OPENAI_API_KEY, XAI_API_KEY, ANTHROPIC_API_KEY
+anchor providers --check           # which keys are set, and does each one work?
 anchor demo
+anchor demo --provider groq --model llama-3.3-70b-versatile   # pick explicitly
 ```
 
-The judge defaults to `claude-sonnet-5-5`. Set `ANCHOR_JUDGE_MODEL` to use
-a different model. It uses structured outputs, so the audit always parses,
-and any claim citing a chunk that wasn't actually retrieved is downgraded
-to unsupported.
+Keys are read from the environment only, never from a command-line flag,
+so they don't end up in shell history or `ps` output.
+
+| Provider | Default model | Key variable | Free tier |
+|---|---|---|---|
+| Google Gemini (default) | `gemini-3.8-flash` | `GEMINI_API_KEY` | Yes, daily limits, no card |
+| Groq | `openai/gpt-oss-120b` | `GROQ_API_KEY` | Yes, about 1,000 requests a day |
+| OpenRouter | `openai/gpt-oss-120b:free` | `OPENROUTER_API_KEY` | `:free` models, 50 a day |
+| Hugging Face | `openai/gpt-oss-120b` | `HF_TOKEN` | Small monthly credit |
+| Mistral | `mistral-small-latest` | `MISTRAL_API_KEY` | Experiment tier |
+| OpenAI | `gpt-6-luna` | `OPENAI_API_KEY` | No |
+| xAI Grok | `grok-4.7` | `XAI_API_KEY` | No |
+| Anthropic | `claude-sonnet-5-5` | `ANTHROPIC_API_KEY` | No |
+| Custom (Ollama, vLLM, LM Studio) | `llama3.2` | `ANCHOR_LLM_API_KEY` (optional) | Local, free |
+
+Any model id the provider serves works with `--model`. The judge asks for
+schema-constrained JSON where the provider supports it, falls back to JSON
+mode or a prompt-only contract where it doesn't, validates every reply,
+and caches verdicts so re-scoring an unchanged answer costs nothing. Any
+claim citing a chunk that wasn't actually retrieved is downgraded to
+unsupported.
 
 Run the test suite (no key needed; CI runs it the same way):
 
@@ -116,7 +140,7 @@ can write the questions *from* your chunks, so that label comes for free:
 
 ```bash
 anchor synth my_corpus.json -n 30 -o questions.json   # offline templates
-ANTHROPIC_API_KEY=sk-ant-... anchor synth my_corpus.json -n 30 -o questions.json   # natural questions from Claude
+GEMINI_API_KEY=... anchor synth my_corpus.json -n 30 -o questions.json   # natural questions from an LLM
 ```
 
 You get single-hop, multi-hop (needs two chunks) and unanswerable
@@ -190,7 +214,7 @@ anchor gate v3-hybrid-retrieval \
   --baseline v2-bm25 --max-mrr-drop 0.02 --max-faithfulness-drop 0.05
 ```
 
-Metrics: `faithfulness`, `recall`, `mrr`, `ndcg`, `map`. With the heuristic
+Metrics: `faithfulness`, `recall`, `precision`, `hit`, `mrr`, `ndcg`, `map`. With the heuristic
 judge (no key), every number is deterministic, so the gate never flakes.
 
 Add `--require-significant` to fail a drop check only when a paired test
@@ -209,7 +233,7 @@ You can run evaluations in the browser, not only view CLI runs:
 - **Evaluate** offers three ways in:
   - **Build and run a pipeline.** Load a corpus (sample, upload, or paste),
     edit the questions in a table or generate them from the corpus, and pick a retriever (BM25, TF-IDF,
-    keyword or hybrid), k, a generator (extractive or Claude) and a judge.
+    keyword or hybrid), k, a generator (extractive or any connected model) and a judge.
     Then run. One checkbox runs every retriever for a quick comparison.
   - **Upload your pipeline's outputs.** Use a JSONL of the queries, ranked
     chunks and answers your own system produced. Anchor scores them
@@ -227,9 +251,14 @@ You can run evaluations in the browser, not only view CLI runs:
   spans.
 - **Learn the metrics** gives every formula with a worked example.
 
-The dashboard can be hosted publicly with no key leakage. Visitors can
-paste their own Anthropic key for the session, and each one gets a private
-workspace. See [DEPLOYMENT.md](DEPLOYMENT.md).
+The sidebar's **Models** section holds any number of connections per
+browser session, each with its own provider, model and key, so you can
+judge with a free Gemini key and generate with OpenAI in the same session.
+Keys stay in server memory for that session only and are forgotten after
+an idle timeout. The dashboard can be hosted publicly with no key leakage:
+every visitor gets a private workspace, and the owner's key, if set, is
+never shown and is capped per session and per day. See
+[DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Documentation
 
@@ -243,14 +272,15 @@ workspace. See [DEPLOYMENT.md](DEPLOYMENT.md).
   decisions
 - [Deployment](DEPLOYMENT.md): secure public hosting on Streamlit
   Community Cloud
+- [Design review](docs/REVIEW.md): a critique of every part, what changed
+  in 0.6, and what is still open
 
 ## What's deliberately out of scope
 
 - No hosted service, no auth, no multi-tenant anything — this is a library
   + a local dashboard, on purpose, so it's auditable and cheap to run.
-- No generation-side cost accounting. The judge's own cost comes from
-  real token usage at list prices, but your pipeline's LLM calls aren't
-  metered.
+- No generation-side cost accounting. The judge records its real token
+  usage, but your pipeline's LLM calls aren't metered.
 - The heuristic judge is intentionally crude (lexical overlap). It exists
   so the project runs with zero setup, not to replace the LLM judge.
 
@@ -260,6 +290,7 @@ workspace. See [DEPLOYMENT.md](DEPLOYMENT.md).
 anchor/
   schema.py             Pydantic models: Chunk, RunInput, JudgeVerdict, RunResult
   retrieval_metrics.py  Recall@k, MRR, nDCG, MAP — pure functions
+  llm.py                Provider-neutral LLM client, key wrapper, structured output
   judge.py              LLM faithfulness judge + offline heuristic fallback
   tracer.py             SQLite span/run storage (auto-upgrades older DBs)
   runner.py             One evaluation path for pipelines and logged outputs
@@ -269,13 +300,14 @@ anchor/
   stats.py              Paired bootstrap CIs, permutation test, detectable effect
   synth.py              Question generation with known reference ids
   gate.py               Pass/fail thresholds for CI
-  cli.py                `anchor demo | run | score | compare | gate | synth`
+  cli.py                `anchor demo | run | score | compare | gate | synth | providers`
 dashboard/
   app.py                Streamlit entry point + navigation
   views.py              Home, Evaluate, Results, Compare, Inspect, Learn
+  connections.py        Per-session model connections and all dashboard key handling
   ui.py                 Styles, score cards, fixed 0–1 charts
 docs/                   User guide, metrics derivations, architecture
 examples/               Sample corpus, questions, logged records, toy pipelines
-tests/                  Metrics, judge, sandbox, records, gate, dashboard (81 tests, offline)
+tests/                  Metrics, judge, providers, sandbox, records, gate, dashboard (offline)
 DEPLOYMENT.md           Secure public deploy on Streamlit Community Cloud
 ```

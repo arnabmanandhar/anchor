@@ -8,7 +8,7 @@ has never seen before.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -31,15 +31,15 @@ class RunInput(BaseModel):
     run_id: str
     pipeline_version: str = "v1"
     query: str
-    retrieved_chunks: List[Chunk] = Field(default_factory=list)
+    retrieved_chunks: list[Chunk] = Field(default_factory=list)
     generated_answer: str
 
     # Optional ground truth. If provided, deterministic retrieval metrics
     # are computed. If omitted, only faithfulness scoring runs.
-    reference_chunk_ids: Optional[List[str]] = None
+    reference_chunk_ids: Optional[list[str]] = None
     reference_answer: Optional[str] = None
 
-    metadata: Dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
     created_at: str = Field(default_factory=_now)
 
 
@@ -49,6 +49,9 @@ class ClaimVerdict(BaseModel):
 
     claim: str
     supported: bool
+    # "supported", "contradicted" or "unsupported". Older traces only have
+    # the boolean, so readers should fall back to it when this is missing.
+    verdict: Optional[str] = None
     chunk_id: Optional[str] = None
     note: Optional[str] = None
 
@@ -57,17 +60,24 @@ class JudgeVerdict(BaseModel):
     """Structured output of the faithfulness judge for one run."""
 
     faithfulness_score: float  # 0.0 - 1.0, fraction of claims grounded
-    claims: List[ClaimVerdict] = Field(default_factory=list)
+    claims: list[ClaimVerdict] = Field(default_factory=list)
     reasoning: Optional[str] = None
     judge_backend: str = "heuristic"  # "llm" or "heuristic"
     judge_model: Optional[str] = None
     fallback_reason: Optional[str] = None  # set when the LLM judge failed and the heuristic ran instead
     input_tokens: int = 0
     output_tokens: int = 0
+    cached: bool = False  # True when the verdict came from the judge cache (no tokens spent)
+
+    @property
+    def contradicted(self) -> int:
+        return sum(1 for c in self.claims if c.verdict == "contradicted")
 
 
 class RetrievalMetrics(BaseModel):
     recall_at_k: Optional[float] = None
+    precision_at_k: Optional[float] = None
+    hit_at_k: Optional[float] = None
     mrr: Optional[float] = None
     ndcg_at_k: Optional[float] = None
     map_score: Optional[float] = None
@@ -81,8 +91,8 @@ class RunResult(BaseModel):
     pipeline_version: str
     query: str
     generated_answer: str = ""
-    retrieved_chunks: List[Chunk] = Field(default_factory=list)
-    reference_chunk_ids: Optional[List[str]] = None
+    retrieved_chunks: list[Chunk] = Field(default_factory=list)
+    reference_chunk_ids: Optional[list[str]] = None
     retrieval: Optional[RetrievalMetrics] = None
     judge: JudgeVerdict
     latency_ms: float

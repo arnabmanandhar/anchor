@@ -105,3 +105,20 @@ def test_demo_is_rerunnable_and_shows_a_regression(tmp_path, monkeypatch):
     assert reports["demo-tfidf"]["mean_recall_at_k"] == 1.0
     assert reports["demo-keyword"]["mean_recall_at_k"] < 1.0
     assert compare_versions(db, "demo-tfidf", "demo-keyword")["regressed_queries"]
+
+
+def test_parallel_evaluation_keeps_order_and_writes_every_run(tmp_path):
+    db = str(tmp_path / "t.db")
+    dataset = [{"query": f"q{i}", "reference_chunk_ids": ["a"]} for i in range(20)]
+    results = evaluate_pipeline(make_pipeline(["a", "b"]), dataset, pipeline_version="par", judge=HEURISTIC,
+                                db_path=db, max_workers=6)
+    assert [r.query for r in results] == [d["query"] for d in dataset]
+    assert len(Tracer(db).fetch_runs("par")) == 20
+    assert len({r.run_id for r in results}) == 20
+
+
+def test_gate_supports_precision_and_hit(tmp_path):
+    db = str(tmp_path / "t.db")
+    evaluate_pipeline(make_pipeline(["a", "b"]), DATASET, pipeline_version="v", judge=HEURISTIC, db_path=db, k=2)
+    assert run_gate(db, "v", floors={"hit": 1.0, "precision": 0.5}).passed
+    assert not run_gate(db, "v", floors={"precision": 0.6}).passed

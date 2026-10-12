@@ -19,7 +19,7 @@ API key is fully reproducible.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Optional
 
 from .compare import significance, summarize_runs
 from .tracer import Tracer
@@ -28,6 +28,8 @@ from .tracer import Tracer
 GATE_METRICS = {
     "faithfulness": "mean_faithfulness",
     "recall": "mean_recall_at_k",
+    "precision": "mean_precision_at_k",
+    "hit": "hit_rate_at_k",
     "mrr": "mean_mrr",
     "ndcg": "mean_ndcg_at_k",
     "map": "mean_map",
@@ -36,6 +38,8 @@ GATE_METRICS = {
 GATE_RUN_KEYS = {
     "faithfulness": "faithfulness",
     "recall": "recall_at_k",
+    "precision": "precision_at_k",
+    "hit": "hit_at_k",
     "mrr": "mrr",
     "ndcg": "ndcg_at_k",
     "map": "map_score",
@@ -46,7 +50,7 @@ GATE_RUN_KEYS = {
 class GateResult:
     version: str
     passed: bool
-    checks: List[Dict] = field(default_factory=list)
+    checks: list[dict] = field(default_factory=list)
 
     def report(self) -> str:
         lines = [f"Gate for {self.version!r}: {'PASS' if self.passed else 'FAIL'}"]
@@ -59,9 +63,9 @@ class GateResult:
 def run_gate(
     db_path: str,
     version: str,
-    floors: Optional[Dict[str, float]] = None,
+    floors: Optional[dict[str, float]] = None,
     baseline: Optional[str] = None,
-    max_drop: Optional[Dict[str, float]] = None,
+    max_drop: Optional[dict[str, float]] = None,
     require_significant: bool = False,
     alpha: float = 0.05,
 ) -> GateResult:
@@ -81,7 +85,7 @@ def run_gate(
     finally:
         tracer.close()
 
-    checks: List[Dict] = []
+    checks: list[dict] = []
     if summary["n_runs"] == 0:
         checks.append({"passed": False, "description": f"no runs found for version {version!r}"})
         return GateResult(version, False, checks)

@@ -24,8 +24,8 @@ pip install -e . --no-deps      # adds the `anchor` command
 Python 3.10 or newer is required. No API key is needed: everything runs
 offline with the heuristic judge.
 
-On Windows PowerShell the commands are the same. To make sure no key is
-set during a test run, use `Remove-Item Env:ANTHROPIC_API_KEY -ErrorAction SilentlyContinue`.
+On Windows PowerShell the commands are the same. The test suite clears
+provider keys itself, so a key in your environment never reaches a test.
 
 ---
 
@@ -39,10 +39,22 @@ The browser opens on **Home**. If the trace database is empty, it is seeded
 with the bundled demo so every page has something to show. The sidebar is
 present on every page and holds:
 
-- **Anthropic API key (optional).** Paste a key to use Claude as the
-  faithfulness judge and as an answer generator. The key lives only in
-  your browser session and is never written to disk, logs or the page.
-  The status box under it says which judge is active.
+- **Models (optional).** Click **Add a model**, pick a provider (Google
+  Gemini, Groq, OpenRouter, Hugging Face, Mistral, OpenAI, xAI Grok,
+  Anthropic, or a custom OpenAI-compatible endpoint such as a local
+  Ollama), pick or type a model id, and paste your key. Providers marked
+  *free tier* cost nothing to try, and a link under the form goes to the
+  provider's key page. You can add several models, for example a free
+  Gemini key for judging and an OpenAI key for generating, and choose one
+  per task wherever a page offers a model. **Test** sends one tiny request
+  to check the key and model; **Remove** forgets that key at once.
+
+  Keys live only in this browser session's server memory. They are never
+  written to disk, logs, the trace database or the page; the card shows
+  only the last four characters. They are forgotten after 60 idle minutes
+  (`ANCHOR_KEY_TTL_MINUTES`), when you close the tab, or when you click
+  **Forget all keys**. If the owner configured one, a *built-in* model
+  appears too, with a small call allowance per session.
 - **Workspace.** Where runs are stored. Locally this is `anchor_traces.db`,
   shared with the CLI. On a public deploy each visitor gets a private
   workspace (see [DEPLOYMENT.md](../DEPLOYMENT.md)).
@@ -73,7 +85,7 @@ Assemble a small RAG pipeline from built-in parts and evaluate it.
 
    **No questions yet?** Open **Generate questions from this corpus**.
    Choose how many, which types (single-hop, multi-hop, unanswerable) and
-   the generator (offline templates, or Claude with a key), then click
+   the generator (offline templates, or any model you added), then click
    **Generate questions**. Each question comes with its reference ids and
    a difficulty label. Untick or edit rows, then **Replace** the question
    table with them, **Add** them to it, or **Download** them as JSON.
@@ -87,8 +99,11 @@ Assemble a small RAG pipeline from built-in parts and evaluate it.
      also the cutoff for Recall@k and nDCG@k.
    - **Answer generator:** *Extractive* copies the best-matching sentences
      from the retrieved chunks. It is offline, and faithful by
-     construction. *Claude* writes an answer from the chunks and needs a key.
-   - **Faithfulness judge:** *Heuristic* (offline) or *LLM* (Claude).
+     construction. Pick one of your models instead to have it write an
+     answer from the chunks. The offline option is the default here
+     because every question costs a call.
+   - **Faithfulness judge:** *Heuristic* (offline) or any model you added.
+     A model is preselected once you add one.
    - **Version name:** the label runs are stored under. Reusing a name
      replaces that version's runs.
    - **Also run every other retriever** evaluates all four retrievers with
@@ -200,22 +215,33 @@ anchor synth corpus.json -n 30 -o questions.json  # generate questions with refe
 ```
 
 Every command takes `--db PATH` (default `anchor_traces.db`). `run` and
-`score` take `--judge auto|llm|heuristic`. `auto` uses the LLM if
-`ANTHROPIC_API_KEY` is set.
+`score` take `--judge auto|llm|heuristic`; `auto` uses an LLM if any
+provider key is set. `demo`, `run`, `score` and `synth` take
+`--provider`, `--model` and `--base-url` (for `--provider custom`).
+Keys are read from the environment only, never from a flag, so they
+don't end up in shell history. `run` and `score` take `--workers N` to
+judge N cases in parallel.
+
+```bash
+anchor providers               # every provider, its default model, and whether its key is set
+anchor providers --check       # also send one tiny request per configured key
+GROQ_API_KEY=... anchor run my_rag:pipeline q.json -v v3 --provider groq --model llama-3.3-70b-versatile
+anchor score out.jsonl -v local --provider custom --base-url http://localhost:11434/v1 --model llama3.2
+```
 
 - **`anchor run`** imports `module:function`, a function taking a question
   and returning `(chunks, answer)`. Add `--factory` if the function builds
   and returns the pipeline instead.
 - **`anchor synth`** reads a corpus in any format the dashboard accepts
   and writes a question set. `--generator auto|template|llm` (auto uses
-  Claude when `ANTHROPIC_API_KEY` is set), `--mix single_hop=6,multi_hop=2,unanswerable=2`,
+  an LLM when a provider key is set), `--mix single_hop=6,multi_hop=2,unanswerable=2`,
   `--drop-easy`, `--seed`. A one-line summary goes to stderr.
 - **`anchor compare`** prints JSON. Its `significance` block has, per
   metric, `n` (shared questions), `mean_delta`, `ci_low`/`ci_high`,
   `p_value`, `significant` and `mde` (smallest detectable change).
   `--alpha` sets the level.
 - **`anchor gate`** exits with code 1 on failure, so it can fail a CI job.
-  Available metrics are `faithfulness`, `recall`, `mrr`, `ndcg` and `map`,
+  Available metrics are `faithfulness`, `recall`, `precision`, `hit`, `mrr`, `ndcg` and `map`,
   each with `--min-X` and `--max-X-drop`. `--require-significant` lets a
   drop beyond `--max-X-drop` pass when it isn't significant at `--alpha`.
 
@@ -232,9 +258,15 @@ def my_pipeline(query: str):
 results = evaluate_pipeline(my_pipeline, dataset, pipeline_version="v3", k=5)
 print(summarize(results))
 
+# choose the judge's provider and model explicitly (key from the environment or passed in)
+import os
+from anchor import Connection, FaithfulnessJudge, Secret
+judge = FaithfulnessJudge(Connection("groq", "llama-3.3-70b-versatile", Secret(os.environ["GROQ_API_KEY"])))
+results = evaluate_pipeline(my_pipeline, dataset, pipeline_version="v3", judge=judge, max_workers=4)
+
 # generate questions from your chunks
 from anchor.synth import generate_questions
-dataset = generate_questions(my_chunks, n=30, generator="template")   # or "llm" with api_key=...
+dataset = generate_questions(my_chunks, n=30, generator="template")   # or "llm" with connection=...
 
 # is v3 really better than v2?
 from anchor import compare_versions
@@ -253,17 +285,29 @@ Then open the dashboard to inspect the runs.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | unset | Enables the LLM judge (CLI and Python). In the dashboard it is the server's fallback key. |
-| `ANCHOR_JUDGE_MODEL` | `claude-sonnet-5-5` | Model for the LLM judge and the Claude generator |
+| `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `HF_TOKEN`, `MISTRAL_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `ANTHROPIC_API_KEY` | unset | Provider keys. With none set everything runs offline. In the dashboard, a key set on the server becomes the capped built-in model. |
+| `ANCHOR_LLM_PROVIDER` | first provider with a key, in the order above | Provider for the CLI and Python when none is passed |
+| `ANCHOR_LLM_MODEL` | the provider's default model | Model id (`ANCHOR_JUDGE_MODEL` is accepted as an alias) |
+| `ANCHOR_LLM_API_KEY` | unset | Key used with `ANCHOR_LLM_PROVIDER`, or for a custom endpoint |
+| `ANCHOR_LLM_BASE_URL` | unset | Endpoint for the custom provider |
+| `ANCHOR_LLM_TIMEOUT` | `60` | Seconds per provider request |
+| `ANCHOR_LLM_WORKERS` | `4` | Parallel LLM calls per dashboard run |
 | `ANCHOR_DB` | `anchor_traces.db` in the repo | Dashboard workspace path (local mode) |
-| `ANCHOR_PUBLIC` | unset | `1` gives every dashboard session a private, demo-seeded workspace |
-| `ANCHOR_SERVER_KEY_SESSION_LIMIT` | `5` | LLM calls per session allowed on the server's key |
+| `ANCHOR_PUBLIC` | unset | `1` gives every dashboard session a private, demo-seeded workspace and refuses private endpoints |
+| `ANCHOR_SERVER_PROVIDER`, `ANCHOR_SERVER_MODEL` | first provider with a key, its default model | The dashboard's built-in model |
+| `ANCHOR_SERVER_KEY_SESSION_LIMIT` | `25` | Built-in model calls per browser session |
+| `ANCHOR_SERVER_KEY_DAILY_LIMIT` | `500` | Built-in model calls per day across all sessions |
+| `ANCHOR_KEY_TTL_MINUTES` | `60` | Idle minutes before a session's keys are forgotten |
 | `ANCHOR_MAX_LLM_CASES` | `25` | Most LLM cases one dashboard click may run |
 
 ## 6. Troubleshooting
 
-- **"LLM judge failed (AuthenticationError); used heuristic fallback."**
-  The key is wrong or revoked. The run still completed, using the heuristic.
+- **"LLM judge failed (auth); used the heuristic instead."** The key is
+  wrong or revoked. The run still completed, using the heuristic. Other
+  reasons: `rate_limit` (free tier exhausted for now), `not_found` (the
+  model id isn't served by that provider), `network`, `parse` (the model
+  didn't return valid JSON even after one repair attempt). Click **Test**
+  on the model card, or run `anchor providers --check`.
 - **Retrieval columns are blank.** Those questions have no reference chunk
   ids, so only faithfulness was scored.
 - **Every change says "could be chance".** Your question set is too

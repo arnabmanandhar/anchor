@@ -3,6 +3,7 @@
 
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -14,11 +15,13 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import connections as models  # noqa: E402
 import ui  # noqa: E402
+
 from anchor.cli import run_demo  # noqa: E402
 from anchor.compare import per_query_diff, significance, summarize_runs  # noqa: E402
 from anchor.gate import GATE_METRICS, GATE_RUN_KEYS  # noqa: E402
-from anchor.judge import DEFAULT_MODEL, FaithfulnessJudge  # noqa: E402
+from anchor.judge import FaithfulnessJudge  # noqa: E402
 from anchor.records import load_records  # noqa: E402
 from anchor.retrieval_metrics import all_retrieval_metrics  # noqa: E402
 from anchor.runner import evaluate_pipeline, evaluate_records, summarize  # noqa: E402
@@ -39,10 +42,9 @@ def _setting(name: str, default: str = "") -> str:
     return str(value) if value is not None else default
 
 
-def public_mode() -> bool:
-    return _setting("ANCHOR_PUBLIC").lower() in ("1", "true", "yes")
-SERVER_KEY_SESSION_LIMIT = int(_setting("ANCHOR_SERVER_KEY_SESSION_LIMIT", "5"))
+public_mode = models.public_mode
 MAX_LLM_CASES = int(_setting("ANCHOR_MAX_LLM_CASES", "25"))
+LLM_WORKERS = int(_setting("ANCHOR_LLM_WORKERS", "4"))
 
 
 
@@ -98,39 +100,21 @@ def all_versions(df: pd.DataFrame):
 
 
 
-# =================================================================== keys
+# ================================================================= models
 
 
-def _server_key():
-    try:
-        key = st.secrets.get("ANTHROPIC_API_KEY")
-    except Exception:  # no secrets.toml locally is fine
-        key = None
-    return key or os.environ.get("ANTHROPIC_API_KEY") or None
+def make_judge(conn_id, tracer=None) -> FaithfulnessJudge:
+    """LLM judge on the chosen connection (with the trace DB as its cache), or the heuristic."""
+    conn = models.get(conn_id)
+    if conn is None:
+        return FaithfulnessJudge(backend="heuristic")
+    return FaithfulnessJudge(conn, backend="llm", cache=tracer)
 
 
-def resolve_key():
-    """(api_key, source) for the next LLM call, or (None, None)."""
-    user_key = st.session_state.get("user_api_key", "").strip()
-    if user_key:
-        return user_key, "your key"
-    server_key = _server_key()
-    if server_key and st.session_state.get("server_key_calls", 0) < SERVER_KEY_SESSION_LIMIT:
-        return server_key, "the server's key"
-    return None, None
-
-
-def charge_server_key(n: int = 1) -> None:
-    _, source = resolve_key()
-    if source == "the server's key":
-        st.session_state.server_key_calls = st.session_state.get("server_key_calls", 0) + n
-
-
-def make_judge(choice: str) -> FaithfulnessJudge:
-    key, _ = resolve_key()
-    if choice == "LLM (Claude)" and key:
-        return FaithfulnessJudge(api_key=key, backend="llm")
-    return FaithfulnessJudge(backend="heuristic")
+def _short(conn_id) -> str:
+    """Short, file-name-safe model label for default version names."""
+    conn = models.get(conn_id)
+    return re.sub(r"[^a-z0-9.]+", "-", conn.model.lower().split("/")[-1]).strip("-") if conn else ""
 
 
 # ================================================================= sidebar
@@ -141,23 +125,7 @@ def sidebar() -> None:
         st.markdown("### :material/anchor: Anchor")
         st.caption("Deterministic-first evaluation for RAG pipelines.")
         st.divider()
-        st.markdown("**LLM judge (optional)**")
-        st.text_input(
-            "Anthropic API key",
-            type="password",
-            key="user_api_key",
-            placeholder="sk-ant-…",
-            help="Used only in this browser session, for the LLM judge and the Claude generator. "
-            "Never stored or logged. Leave empty to run everything offline.",
-        )
-        key, source = resolve_key()
-        if key:
-            st.success(f"LLM judge available, using {source}.", icon=":material/check_circle:")
-        else:
-            st.info("Running offline: the heuristic judge is used. Add a key to audit claims with Claude.", icon=":material/info:")
-        if _server_key() and not st.session_state.get("user_api_key"):
-            left = max(SERVER_KEY_SESSION_LIMIT - st.session_state.get("server_key_calls", 0), 0)
-            st.caption(f"{left} LLM calls left on the server's key this session.")
+        models.render_sidebar()
         st.divider()
         if public_mode():
             st.caption(":material/lock: Private workspace: your runs are visible only in this browser session.")
@@ -276,18 +244,16 @@ def _synth_panel(source: str, chunks) -> None:
             "Each question is written from specific chunks, so its reference ids are known without labelling. "
             "Review the list, untick anything you don't want, then add it to the question table."
         )
-        key, _ = resolve_key()
         c1, c2, c3 = st.columns([1, 2, 2])
         n = c1.number_input("How many", 1, 60, 12, key=f"synth_n::{source}")
         types = c2.multiselect("Question types", QUESTION_TYPES, default=list(QUESTION_TYPES),
                                format_func=TYPE_LABELS.get, key=f"synth_types::{source}",
                                help="Single-hop: one chunk answers it. Multi-hop: needs two chunks. "
                                     "Unanswerable: on topic, but nothing in the corpus answers it.")
-        generator = c3.selectbox(
-            "Generator", ["template", "llm"], key=f"synth_gen::{source}",
-            format_func=lambda g: "Templates (offline)" if g == "template" else f"Claude ({DEFAULT_MODEL})",
-            help="Templates blank out one fact from a sentence: free and deterministic, but close to the source "
-                 "wording, so most questions are easy. Claude writes natural questions and needs an API key.")
+        gen_conn = models.picker(
+            "Generator", "Templates (offline)", key=f"synth_gen::{source}", container=c3, prefer_model=False,
+            help_text="Templates blank out one fact from a sentence: free and deterministic, but close to the source "
+                      "wording, so most questions are easy. A model writes natural questions; add one in the sidebar.")
         c4, c5 = st.columns([2, 1])
         drop_easy = c4.checkbox("Skip easy questions", key=f"synth_easy::{source}",
                                 help="Drops questions that plain keyword overlap already retrieves perfectly.")
@@ -296,20 +262,20 @@ def _synth_panel(source: str, chunks) -> None:
         problems = []
         if not types:
             problems.append("pick at least one question type")
-        if generator == "llm" and not key:
-            problems.append("add an API key in the sidebar, or use templates")
-        if generator == "llm" and n > MAX_LLM_CASES:
-            problems.append(f"keep Claude generation to {MAX_LLM_CASES} questions per click")
+        if gen_conn and n > MAX_LLM_CASES:
+            problems.append(f"keep model generation to {MAX_LLM_CASES} questions per click")
+        if gen_conn:
+            problems.append(models.budget_problem([gen_conn], 2 * int(n)) or "")
+        problems = [p for p in problems if p]
         if problems:
             st.caption("To generate: " + "; ".join(problems) + ".")
         if st.button("Generate questions", disabled=bool(problems), key=f"synth_go::{source}"):
             try:
                 with st.spinner("Generating…"):
                     qs = generate_questions(chunks, n=int(n), mix={t: DEFAULT_MIX[t] for t in types},
-                                            generator=generator, api_key=key if generator == "llm" else None,
-                                            seed=int(seed), drop_easy=drop_easy)
-                if generator == "llm":
-                    charge_server_key(int(n))
+                                            generator="llm" if gen_conn else "template",
+                                            connection=models.get(gen_conn), seed=int(seed), drop_easy=drop_easy)
+                models.charge(gen_conn, 2 * int(n))
                 st.session_state[skey] = pd.DataFrame([{
                     "use": True, "query": q["query"], "reference_chunk_ids": ", ".join(q["reference_chunk_ids"]),
                     "type": TYPE_LABELS[q["type"]], "difficulty": q["difficulty"],
@@ -317,7 +283,7 @@ def _synth_panel(source: str, chunks) -> None:
                 } for q in qs])
                 st.session_state[f"synth_ver::{source}"] = st.session_state.get(f"synth_ver::{source}", 0) + 1
             except Exception as e:
-                st.error(f"Generation stopped: {type(e).__name__}.")
+                st.error(f"Generation stopped: {getattr(e, 'kind', type(e).__name__)}.")
         frame = st.session_state.get(skey)
         if frame is None:
             return
@@ -327,7 +293,7 @@ def _synth_panel(source: str, chunks) -> None:
         counts = frame["type"].value_counts()
         levels = frame.loc[frame["difficulty"] != "n/a", "difficulty"].value_counts()
         st.markdown(f"**{len(frame)} questions:** " + " · ".join(f"{v} {k.lower()}" for k, v in counts.items())
-                    + (f"  ·  difficulty: " + ", ".join(f"{levels.get(lv, 0)} {lv}" for lv in ("easy", "medium", "hard"))
+                    + ("  ·  difficulty: " + ", ".join(f"{levels.get(lv, 0)} {lv}" for lv in ("easy", "medium", "hard"))
                        if not levels.empty else ""))
         reviewed = st.data_editor(
             frame, hide_index=True, width="stretch",
@@ -432,7 +398,6 @@ def _tab_build():
     ]
 
     st.markdown("##### 3 · Pipeline")
-    key, _ = resolve_key()
     c1, c2, c3 = st.columns(3)
     retriever = c1.selectbox(
         "Retriever", RETRIEVERS, format_func=lambda r: {"bm25": "BM25", "tfidf": "TF-IDF", "keyword": "Keyword overlap",
@@ -440,30 +405,30 @@ def _tab_build():
         help="All built in and offline. Keyword overlap is deliberately weak, to show what a regression looks like.",
     )
     top_k = c2.slider("Chunks retrieved (k)", 1, 10, 3, help="Also the cutoff for Recall@k and nDCG@k.")
-    generator = c3.selectbox(
-        "Answer generator", ["extractive", "llm"],
-        format_func=lambda g: "Extractive (offline)" if g == "extractive" else f"Claude ({DEFAULT_MODEL})",
-        help="Extractive copies the best-matching sentences from the retrieved chunks. Claude writes an answer "
-        "from the chunks and needs an API key.",
-    )
+    gen_conn = models.picker(
+        "Answer generator", "Extractive (offline)", key="build_gen", container=c3, prefer_model=False,
+        help_text="Extractive copies the best-matching sentences from the retrieved chunks. A model writes an "
+                  "answer from the chunks; add one in the sidebar.")
     c4, c5 = st.columns([1, 2])
-    judge_choice = c4.selectbox("Faithfulness judge", ["Heuristic (offline)", "LLM (Claude)"],
-                                index=1 if key else 0, help="The LLM judge needs an API key.")
-    default_name = f"{retriever}-k{top_k}-{'claude' if generator == 'llm' else 'extractive'}"
+    judge_conn = models.picker("Faithfulness judge", "Heuristic (offline)", key="build_judge", container=c4,
+                               help_text="An LLM judge reads each claim against the chunks; the heuristic checks word "
+                                         "overlap offline.")
+    default_name = f"{retriever}-k{top_k}-{_short(gen_conn) or 'extractive'}"
     version = c5.text_input("Version name", value=default_name,
                             help="Runs are stored under this label. Reuse a name to replace its runs.")
     all_four = st.checkbox("Also run every other retriever with the same settings (quick comparison)")
 
-    needs_key = generator == "llm" or judge_choice == "LLM (Claude)"
+    llm_calls = len(dataset) * (4 if all_four else 1)
     problems = []
     if not chunks:
         problems.append("add a corpus")
     if not dataset:
         problems.append("add at least one question")
-    if needs_key and not key:
-        problems.append("add an API key in the sidebar for Claude, or switch to the offline options")
-    if needs_key and len(dataset) * (4 if all_four else 1) > MAX_LLM_CASES:
-        problems.append(f"keep LLM runs to {MAX_LLM_CASES} cases or fewer per click")
+    if (gen_conn or judge_conn) and llm_calls > MAX_LLM_CASES:
+        problems.append(f"keep model runs to {MAX_LLM_CASES} cases or fewer per click")
+    budget = models.budget_problem([gen_conn, judge_conn], llm_calls)
+    if budget:
+        problems.append(budget)
     if problems:
         st.caption("To run: " + "; ".join(problems) + ".")
 
@@ -482,17 +447,20 @@ def _tab_build():
         try:
             for name, method in plan:
                 tracer.delete_version(name)
-                pipeline = make_pipeline(chunks, method, top_k, generator, api_key=key if generator == "llm" else None)
+                pipeline = make_pipeline(chunks, method, top_k, "llm" if gen_conn else "extractive",
+                                         connection=models.get(gen_conn))
 
-                def tick(i, n, name=name):
+                def tick(i, n, name=name, done=done):
                     bar.progress((done + i) / total, text=f"{name}: {i}/{n}")
 
                 all_results += evaluate_pipeline(pipeline, dataset, pipeline_version=name, k=top_k, tracer=tracer,
-                                                 judge=make_judge(judge_choice), progress=tick)
+                                                 judge=make_judge(judge_conn, tracer), progress=tick,
+                                                 max_workers=LLM_WORKERS if (gen_conn or judge_conn) else 1)
                 done += len(dataset)
-            charge_server_key(total if needs_key else 0)
+                models.charge(gen_conn, len(dataset))
+                models.charge(judge_conn, len(dataset))
         except Exception as e:
-            st.error(f"Evaluation stopped: {type(e).__name__}. Runs finished so far were saved.")
+            st.error(f"Evaluation stopped: {getattr(e, 'kind', type(e).__name__)}. Runs finished so far were saved.")
         finally:
             tracer.close()
             bar.empty()
@@ -544,24 +512,27 @@ def _tab_upload():
             st.dataframe(pd.DataFrame([{"query": r["query"], "chunks": len(r["retrieved_chunks"]), "answer": r["answer"],
                                         "reference_chunk_ids": ", ".join(r["reference_chunk_ids"] or [])} for r in records]),
                          hide_index=True, width="stretch")
-    key, _ = resolve_key()
     c1, c2, c3 = st.columns([2, 1, 1])
     version = c1.text_input("Version name", value="my-pipeline-v1" if not use_sample else "sample-logged-pipeline")
     k = c2.number_input("k (metric cutoff)", 1, 50, 5)
-    judge_choice = c3.selectbox("Judge", ["Heuristic (offline)", "LLM (Claude)"], index=1 if key else 0, key="upload_judge")
-    blocked = not records or (judge_choice == "LLM (Claude)" and (not key or len(records) > MAX_LLM_CASES))
-    if judge_choice == "LLM (Claude)" and not key:
-        st.caption("Add an API key in the sidebar to use the LLM judge.")
+    judge_conn = models.picker("Judge", "Heuristic (offline)", key="upload_judge", container=c3)
+    problem = None
+    if records and judge_conn:
+        problem = (f"keep model judging to {MAX_LLM_CASES} records per click" if len(records) > MAX_LLM_CASES
+                   else models.budget_problem([judge_conn], len(records)))
+    if problem:
+        st.caption(f"To score: {problem}.")
+    blocked = not records or bool(problem)
     if st.button("Score these outputs", type="primary", disabled=blocked):
         tracer = Tracer(db())
         tracer.delete_version(version)
         bar = st.progress(0.0, text="Scoring…")
         try:
             results = evaluate_records(records, pipeline_version=version, k=int(k), tracer=tracer,
-                                       judge=make_judge(judge_choice),
-                                       progress=lambda i, n: bar.progress(i / n, text=f"{i}/{n}"))
-            if judge_choice == "LLM (Claude)":
-                charge_server_key(len(records))
+                                       judge=make_judge(judge_conn, tracer),
+                                       progress=lambda i, n: bar.progress(i / n, text=f"{i}/{n}"),
+                                       max_workers=LLM_WORKERS if judge_conn else 1)
+            models.charge(judge_conn, len(records))
         finally:
             tracer.close()
             bar.empty()
@@ -591,24 +562,25 @@ def _tab_single():
     c1, c2, c3 = st.columns([2, 1, 1])
     refs = c1.text_input("Reference chunk ids (optional)", "prov-007, art-056", key="single_refs")
     k = c2.number_input("k", 1, 50, 3, key="single_k")
-    key, _ = resolve_key()
-    judge_choice = c3.selectbox("Judge", ["Heuristic (offline)", "LLM (Claude)"], index=1 if key else 0, key="single_judge")
+    judge_conn = models.picker("Judge", "Heuristic (offline)", key="single_judge", container=c3)
     if st.button("Score", type="primary"):
         chunks = [Chunk(id=str(r["id"]).strip(), text=str(r["text"]).strip())
                   for _, r in chunk_df.iterrows() if str(r.get("id") or "").strip() and str(r.get("text") or "").strip()]
         if not chunks or not answer.strip():
             st.warning("Add at least one chunk and an answer.")
             return
-        judge = make_judge(judge_choice)
-        if judge.active_backend == "llm":
-            charge_server_key()
+        if models.budget_problem([judge_conn], 1):
+            st.warning(models.budget_problem([judge_conn], 1).capitalize() + ".")
+            return
+        judge = make_judge(judge_conn)
+        models.charge(judge_conn, 1)
         with st.spinner("Scoring…"):
             verdict = judge.score(question, chunks, answer)
         ref_ids = parse_reference_ids(refs)
         retrieval = all_retrieval_metrics([c.id for c in chunks], ref_ids, k=int(k)) if ref_ids else None
         values = {"faithfulness": verdict.faithfulness_score}
         if retrieval:
-            values.update({m: getattr(retrieval, m) for m in ("recall_at_k", "mrr", "ndcg_at_k", "map_score")})
+            values.update({m: getattr(retrieval, m) for m in ("recall_at_k", "precision_at_k", "mrr", "ndcg_at_k", "map_score")})
         ui.score_cards(values)
         st.caption(f"Judge: {verdict.judge_backend}. {verdict.reasoning or ''}")
         left, right = st.columns(2)

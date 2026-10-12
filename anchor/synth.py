@@ -17,8 +17,9 @@ Generators
               predicate of "X is Y"). Questions stay close to the source
               wording, so they are lexically easy: good for smoke tests and
               CI, not a substitute for real user questions.
-  "llm"       Claude writes natural questions from the chunk(s), so wording
-              differs from the source and retrieval is genuinely tested.
+  "llm"       a language model (any provider anchor.llm supports) writes
+              natural questions from the chunk(s), so wording differs from
+              the source and retrieval is genuinely tested.
 
 Every question then goes through the same deterministic checks:
   - de-duplication (token Jaccard >= 0.8 with an earlier question)
@@ -32,13 +33,14 @@ Every question then goes through the same deterministic checks:
 
 from __future__ import annotations
 
-import json
 import random
 import re
 from collections import Counter
-from typing import Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Optional
 
-from .judge import DEFAULT_MODEL, split_sentences
+from . import llm
+from .judge import split_sentences
 from .sandbox import _Index, _rank, tokenize
 from .schema import Chunk
 
@@ -54,7 +56,7 @@ _NUMBERED = "Article|Section|Chapter|Clause|Rule|Part|Schedule|Step|Figure|Table
 
 # Questions about the corpus's main subject that a corpus should not answer
 # unless it contains one of the key words; checked against the vocabulary.
-_UNANSWERABLE_TEMPLATES: List[Tuple[str, Tuple[str, ...]]] = [
+_UNANSWERABLE_TEMPLATES: list[tuple[str, tuple[str, ...]]] = [
     ("Who composed the national anthem of {e}?", ("anthem", "composed")),
     ("What is the official currency of {e}?", ("currency",)),
     ("How many airports does {e} have?", ("airport", "airports")),
@@ -84,7 +86,7 @@ def _finish(question: str, gap_end: int) -> str:
     return question.strip().rstrip(".") + "?"
 
 
-def cloze_questions(sentence: str) -> List[Dict[str, str]]:
+def cloze_questions(sentence: str) -> list[dict[str, str]]:
     """Template questions from one sentence, best first. Each is
     {"question", "answer", "rule"}; empty when no rule applies."""
     s = sentence.strip().rstrip(".")
@@ -137,9 +139,9 @@ def _main_entity(chunks: Sequence[Chunk]) -> str:
     return counts.most_common(1)[0][0] if counts else "this subject"
 
 
-def _shared_term_pairs(chunks: Sequence[Chunk], index: _Index, rng: random.Random) -> List[Tuple[Chunk, Chunk, str]]:
+def _shared_term_pairs(chunks: Sequence[Chunk], index: _Index, rng: random.Random) -> list[tuple[Chunk, Chunk, str]]:
     """Pairs of chunks linked by a distinctive term (in 2 or 3 chunks only)."""
-    by_term: Dict[str, List[int]] = {}
+    by_term: dict[str, list[int]] = {}
     for i, doc in enumerate(index.docs):
         for t in set(doc):
             if len(t) > 3 and not t.isdigit() and 2 <= index.df[t] <= 3:
@@ -157,7 +159,7 @@ def _shared_term_pairs(chunks: Sequence[Chunk], index: _Index, rng: random.Rando
     return pairs
 
 
-def _template_single(chunk: Chunk) -> Optional[Dict]:
+def _template_single(chunk: Chunk) -> Optional[dict]:
     for sent in split_sentences(chunk.text):
         qs = cloze_questions(sent)
         if qs:
@@ -165,7 +167,7 @@ def _template_single(chunk: Chunk) -> Optional[Dict]:
     return None
 
 
-def _template_multi(a: Chunk, b: Chunk) -> Optional[Dict]:
+def _template_multi(a: Chunk, b: Chunk) -> Optional[dict]:
     qa, qb = _template_single(a), _template_single(b)
     if not qa or not qb:
         return None
@@ -176,7 +178,7 @@ def _template_multi(a: Chunk, b: Chunk) -> Optional[Dict]:
             "reference_answer": f"{qa['reference_answer']}; {qb['reference_answer']}", "rule": "compound"}
 
 
-def _template_unanswerable(chunks: Sequence[Chunk], vocab: set, rng: random.Random) -> List[Dict]:
+def _template_unanswerable(chunks: Sequence[Chunk], vocab: set, rng: random.Random) -> list[dict]:
     entity = _main_entity(chunks)
     usable = [t for t, keys in _UNANSWERABLE_TEMPLATES if not any(k in vocab for k in keys)]
     rng.shuffle(usable)
@@ -206,21 +208,15 @@ _LLM_TASKS = {
 }
 
 
-def _llm_question(kind: str, context_chunks: Sequence[Chunk], api_key: str, model: Optional[str]) -> Optional[Dict]:
-    import anthropic  # local import so the package doesn't hard-require it
-
-    client = anthropic.Anthropic(api_key=api_key)
+def _llm_question(kind: str, context_chunks: Sequence[Chunk], connection: llm.Connection) -> Optional[dict]:
     context = "\n".join(f"[{c.id}] {c.text}" for c in context_chunks)
-    resp = client.messages.create(
-        model=model or DEFAULT_MODEL,
-        max_tokens=16000,
-        system=_LLM_SYSTEM,
-        output_config={"effort": "low", "format": {"type": "json_schema", "schema": _LLM_SCHEMA}},
-        messages=[{"role": "user", "content": _LLM_TASKS[kind].format(context=context)}],
-    )
-    if resp.stop_reason in ("refusal", "max_tokens"):
+    try:
+        data, _ = llm.complete_json(connection, _LLM_SYSTEM, _LLM_TASKS[kind].format(context=context), _LLM_SCHEMA,
+                                    max_tokens=2048, name="question")
+    except llm.LLMError as e:
+        if e.kind in ("auth", "not_found", "blocked"):
+            raise  # a broken key or model won't fix itself on the next candidate
         return None
-    data = json.loads(next(b.text for b in resp.content if b.type == "text"))
     question = data["question"].strip()
     if not question:
         return None
@@ -250,7 +246,7 @@ def difficulty(query: str, reference_ids: Sequence[str], index: _Index, k: int =
     return "medium" if refs <= bm_top else "hard"
 
 
-def _quotas(n: int, mix: Dict[str, float]) -> Dict[str, int]:
+def _quotas(n: int, mix: dict[str, float]) -> dict[str, int]:
     total = sum(mix.values()) or 1.0
     raw = {t: n * w / total for t, w in mix.items() if w > 0}
     quotas = {t: int(v) for t, v in raw.items()}
@@ -265,14 +261,13 @@ def _quotas(n: int, mix: Dict[str, float]) -> Dict[str, int]:
 def generate_questions(
     chunks: Sequence[Chunk],
     n: int = 20,
-    mix: Optional[Dict[str, float]] = None,
+    mix: Optional[dict[str, float]] = None,
     generator: str = "template",
-    api_key: Optional[str] = None,
-    model: Optional[str] = None,
+    connection: Optional[llm.Connection] = None,
     seed: int = 0,
     drop_easy: bool = False,
     k: int = 3,
-) -> List[Dict]:
+) -> list[dict]:
     """Generate up to n questions from chunks.
 
     mix maps question types to weights (default 60% single_hop, 20% multi_hop,
@@ -283,8 +278,8 @@ def generate_questions(
     """
     if generator not in GENERATORS:
         raise ValueError(f"unknown generator {generator!r}; choose from {GENERATORS}")
-    if generator == "llm" and not api_key:
-        raise ValueError("the llm generator needs an API key")
+    if generator == "llm" and connection is None:
+        raise ValueError("the llm generator needs a model connection")
     mix = mix if mix is not None else DEFAULT_MIX
     unknown = set(mix) - set(QUESTION_TYPES)
     if unknown:
@@ -302,26 +297,26 @@ def generate_questions(
             order = chunks[:]
             rng.shuffle(order)
             for c in order:
-                q = _llm_question(kind, [c], api_key, model) if generator == "llm" else _template_single(c)
+                q = _llm_question(kind, [c], connection) if generator == "llm" else _template_single(c)
                 if q:
                     yield q, [c.id]
         elif kind == "multi_hop":
             for a, b, _term in _shared_term_pairs(chunks, index, rng):
-                q = _llm_question(kind, [a, b], api_key, model) if generator == "llm" else _template_multi(a, b)
+                q = _llm_question(kind, [a, b], connection) if generator == "llm" else _template_multi(a, b)
                 if q:
                     yield q, [a.id, b.id]
         else:
             if generator == "llm":
                 for _ in range(quotas.get(kind, 0) * 2):
                     sample = rng.sample(chunks, min(len(chunks), 12))
-                    q = _llm_question(kind, sample, api_key, model)
+                    q = _llm_question(kind, sample, connection)
                     if q:
                         yield q, []
             else:
                 for q in _template_unanswerable(chunks, vocab, rng):
                     yield q, []
 
-    out: List[Dict] = []
+    out: list[dict] = []
     for kind in QUESTION_TYPES:
         want = quotas.get(kind, 0)
         got = 0

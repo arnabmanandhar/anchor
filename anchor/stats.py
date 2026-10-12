@@ -20,8 +20,9 @@ from __future__ import annotations
 import itertools
 import math
 import random
+from collections.abc import Sequence
 from statistics import mean, stdev
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Optional
 
 DEFAULT_SEED = 0
 DEFAULT_RESAMPLES = 5000
@@ -33,7 +34,7 @@ EXACT_PERMUTATION_MAX_N = 14
 _Z_ALPHA, _Z_POWER = 1.959964, 0.841621
 
 
-def _percentile(sorted_vals: List[float], q: float) -> float:
+def _percentile(sorted_vals: list[float], q: float) -> float:
     """Linear-interpolated percentile of an already sorted list, q in [0, 1]."""
     if len(sorted_vals) == 1:
         return sorted_vals[0]
@@ -47,7 +48,7 @@ def bootstrap_ci(
     confidence: float = 0.95,
     n_resamples: int = DEFAULT_RESAMPLES,
     seed: int = DEFAULT_SEED,
-) -> Optional[Tuple[float, float]]:
+) -> Optional[tuple[float, float]]:
     """Percentile bootstrap confidence interval for the mean of values."""
     values = [v for v in values if v is not None]
     if not values:
@@ -109,7 +110,7 @@ def paired_test(
     alpha: float = 0.05,
     n_resamples: int = DEFAULT_RESAMPLES,
     seed: int = DEFAULT_SEED,
-) -> Dict:
+) -> dict:
     """Compare paired scores a[i] (baseline) and b[i] (candidate) on the same questions.
 
     Pairs where either side is None are dropped. Returns n, mean_a, mean_b,
@@ -139,7 +140,7 @@ def paired_test(
     }
 
 
-def describe(result: Dict) -> str:
+def describe(result: dict) -> str:
     """One plain-language line for a paired_test result."""
     if not result["n"]:
         return "no shared questions to compare"

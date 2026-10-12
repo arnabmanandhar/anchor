@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import html
 import json
-from typing import Dict, List, Optional
+from typing import Optional
 
 import altair as alt
 import pandas as pd
@@ -23,11 +23,13 @@ METRICS = [
     # key in a run row, summary key, label, one-line meaning
     ("faithfulness", "mean_faithfulness", "Faithfulness", "Share of answer claims grounded in a retrieved chunk"),
     ("recall_at_k", "mean_recall_at_k", "Recall@k", "Share of relevant chunks found in the top k"),
+    ("precision_at_k", "mean_precision_at_k", "Precision@k", "Share of the top k slots holding a relevant chunk"),
     ("mrr", "mean_mrr", "MRR", "1 / rank of the first relevant chunk"),
     ("ndcg_at_k", "mean_ndcg_at_k", "nDCG@k", "Ranking quality, rewarding relevant chunks near the top"),
     ("map_score", "mean_map", "MAP", "Precision averaged at every relevant hit"),
 ]
 METRIC_LABELS = {m[0]: m[2] for m in METRICS}
+METRIC_LABELS["hit_at_k"] = "Hit@k"  # in tables and significance tests, not a score card
 
 CSS = """
 <style>
@@ -57,7 +59,10 @@ h1, h2, h3 {letter-spacing: -0.01em;}
 .claim .pill {display: inline-block; font-size: .7rem; font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
   padding: .05rem .5rem; border-radius: 999px; margin-right: .45rem; vertical-align: 1px;}
 .claim.ok .pill {background: rgba(0,131,0,.14); color: #008300;}
-.claim.bad .pill {background: rgba(227,73,72,.14); color: #e34948;}
+.claim.bad .pill {background: rgba(237,161,0,.18); color: #9a6700;}
+.claim.bad {border-color: rgba(237,161,0,.45); background: rgba(237,161,0,.07);}
+.claim.contra {border-color: rgba(227,73,72,.5); background: rgba(227,73,72,.08);}
+.claim.contra .pill {background: rgba(227,73,72,.16); color: #c62828;}
 .claim .meta {font-size: .8rem; opacity: .75; margin-top: .2rem;}
 .chunk {border: 1px solid rgba(128,128,128,0.25); border-radius: 10px; padding: .55rem .8rem; margin: .3rem 0;}
 .badge {display: inline-block; font-size: .72rem; padding: .05rem .45rem; border-radius: 999px; margin-right: .3rem;
@@ -96,7 +101,7 @@ def score_card(label: str, value: Optional[float], hint: str = "", fmt: str = "{
     )
 
 
-def score_cards(values: Dict[str, Optional[float]]) -> None:
+def score_cards(values: dict[str, Optional[float]]) -> None:
     """values: {metric_key: value} for the metrics in METRICS order."""
     cols = st.columns(len(METRICS))
     for col, (key, _, label, hint) in zip(cols, METRICS):
@@ -107,7 +112,7 @@ def card(title: str, body: str) -> str:
     return f'<div class="anchor-card"><h4>{esc(title)}</h4><p>{body}</p></div>'
 
 
-def version_colors(shown: List[str], all_versions: List[str]) -> alt.Scale:
+def version_colors(shown: list[str], all_versions: list[str]) -> alt.Scale:
     # Colour follows the version's position in the full sorted list, so
     # filtering never repaints the remaining versions; the legend lists only
     # the versions on screen.
@@ -115,7 +120,7 @@ def version_colors(shown: List[str], all_versions: List[str]) -> alt.Scale:
     return alt.Scale(domain=shown, range=[SERIES[all_versions.index(v) % len(SERIES)] for v in shown])
 
 
-def metric_bars(means: pd.DataFrame, all_versions: List[str]) -> alt.Chart:
+def metric_bars(means: pd.DataFrame, all_versions: list[str]) -> alt.Chart:
     """means: one row per version, columns = metric keys. Grouped bars on a fixed 0–1 axis."""
     long = means.reset_index().melt(id_vars="pipeline_version", var_name="metric", value_name="score").dropna()
     long["metric"] = long["metric"].map(METRIC_LABELS)
@@ -137,7 +142,7 @@ def metric_bars(means: pd.DataFrame, all_versions: List[str]) -> alt.Chart:
     )
 
 
-def per_query_bars(df: pd.DataFrame, metric: str, all_versions: List[str]) -> alt.Chart:
+def per_query_bars(df: pd.DataFrame, metric: str, all_versions: list[str]) -> alt.Chart:
     """Horizontal bars per query (and version) for one metric, on a fixed 0–1 axis."""
     data = df[["query", "pipeline_version", metric]].dropna()
     n_rows = data["query"].nunique()
@@ -157,7 +162,7 @@ def per_query_bars(df: pd.DataFrame, metric: str, all_versions: List[str]) -> al
     )
 
 
-def delta_ci_chart(tests: Dict[str, Dict]) -> alt.Chart:
+def delta_ci_chart(tests: dict[str, dict]) -> alt.Chart:
     """Mean paired difference per metric with its confidence interval, on a
     fixed −1 to +1 axis (every score difference lives there)."""
     order = [m[2] for m in METRICS]
@@ -182,7 +187,7 @@ def delta_ci_chart(tests: Dict[str, Dict]) -> alt.Chart:
     return (zero + interval + point).properties(height=44 * len(data) + 40)
 
 
-def span_chart(spans: List[Dict]) -> alt.Chart:
+def span_chart(spans: list[dict]) -> alt.Chart:
     data = pd.DataFrame(spans)[["name", "duration_ms"]]
     return (
         alt.Chart(data)
@@ -203,18 +208,25 @@ def score_column(label: str, help_text: str = "") -> st.column_config.ProgressCo
 SCORE_COLUMNS = {key: score_column(label, hint) for key, _, label, hint in METRICS}
 
 
-def claim_cards(claims: List[Dict]) -> None:
+def claim_cards(claims: list[dict]) -> None:
     for c in claims:
-        ok = c.get("supported")
-        meta = f"Supported by chunk <b>{esc(c.get('chunk_id'))}</b>" if ok else f"Unsupported. {esc(c.get('note') or '')}"
+        # Older traces have only the boolean; newer ones say contradicted vs unsupported.
+        verdict = c.get("verdict") or ("supported" if c.get("supported") else "unsupported")
+        if verdict == "supported":
+            meta = f"Supported by chunk <b>{esc(c.get('chunk_id'))}</b>"
+        elif verdict == "contradicted":
+            meta = f"Contradicted by chunk <b>{esc(c.get('chunk_id'))}</b>. {esc(c.get('note') or '')}"
+        else:
+            meta = f"Not found in any retrieved chunk. {esc(c.get('note') or '')}"
+        css = {"supported": "ok", "contradicted": "contra"}.get(verdict, "bad")
         st.markdown(
-            f'<div class="claim {"ok" if ok else "bad"}"><span class="pill">{"Supported" if ok else "Unsupported"}</span>{esc(c.get("claim"))}'
+            f'<div class="claim {css}"><span class="pill">{verdict.capitalize()}</span>{esc(c.get("claim"))}'
             f'<div class="meta">{meta}</div></div>',
             unsafe_allow_html=True,
         )
 
 
-def chunk_cards(chunks: List[Dict], reference: set, cited: set) -> None:
+def chunk_cards(chunks: list[dict], reference: set, cited: set) -> None:
     for rank, c in enumerate(chunks, start=1):
         badges = ""
         if c["id"] in reference:
@@ -228,7 +240,7 @@ def chunk_cards(chunks: List[Dict], reference: set, cited: set) -> None:
         )
 
 
-def runs_frame(runs: List[Dict]) -> pd.DataFrame:
+def runs_frame(runs: list[dict]) -> pd.DataFrame:
     """Flatten trace-DB run rows into a DataFrame with one column per metric."""
     df = pd.DataFrame(runs)
     if df.empty:
@@ -238,7 +250,9 @@ def runs_frame(runs: List[Dict]) -> pd.DataFrame:
     df["faithfulness"] = judge.apply(lambda j: j["faithfulness_score"])
     df["judge_backend"] = judge.apply(lambda j: j["judge_backend"])
     df["claims"] = judge.apply(lambda j: len(j["claims"]))
-    for key in ("recall_at_k", "mrr", "ndcg_at_k", "map_score"):
-        df[key] = retrieval.apply(lambda r, k=key: r[k] if r else None)
+    df["contradicted"] = judge.apply(lambda j: sum(1 for c in j["claims"] if c.get("verdict") == "contradicted"))
+    df["judge_model"] = judge.apply(lambda j: j.get("judge_model") or "heuristic")
+    for key in ("recall_at_k", "precision_at_k", "hit_at_k", "mrr", "ndcg_at_k", "map_score"):
+        df[key] = retrieval.apply(lambda r, k=key: r.get(k) if r else None)  # older traces lack some metrics
     df["k"] = retrieval.apply(lambda r: r["k"] if r else None)
     return df
