@@ -51,7 +51,7 @@ present on every page and holds:
 
 There are three tabs, one for each situation.
 
-#### 🧪 Build & run a pipeline
+#### Build and run a pipeline
 
 Assemble a small RAG pipeline from built-in parts and evaluate it.
 
@@ -64,7 +64,7 @@ Assemble a small RAG pipeline from built-in parts and evaluate it.
      become `c1`, `c2`, …)
 
    Open **Preview corpus** to check how it was split.
-2. **Questions.** Edit the table directly: add rows with the ➕ at the
+2. **Questions.** Edit the table directly: add rows with the + at the
    bottom, delete with the row checkbox. You can also load a CSV, JSON or
    JSONL file of `{query, reference_chunk_ids}`. *Reference chunk ids* are
    the ground truth: the ids of chunks that should be retrieved, comma
@@ -90,7 +90,7 @@ Assemble a small RAG pipeline from built-in parts and evaluate it.
 LLM runs are capped at 25 cases per click (`ANCHOR_MAX_LLM_CASES`), so a
 mistaken click can't run up a bill.
 
-#### 📤 Upload your pipeline's outputs
+#### Upload your pipeline's outputs
 
 Use this to evaluate a pipeline you already have, built with LangChain,
 LlamaIndex, raw API calls or anything else, without connecting it to
@@ -118,7 +118,7 @@ Anchor. Log one record per question and upload the file:
 
 Latency in these runs measures Anchor's scoring, not your pipeline.
 
-#### ✍️ Score a single answer
+#### Score a single answer
 
 Paste a question, the retrieved chunks in rank order, and an answer. You
 get every metric plus the claim-by-claim audit next to the chunks. Use
@@ -138,15 +138,26 @@ this to understand the judge, or to debug one bad answer. Nothing is saved.
 
 ### Compare
 
-Pick a baseline (A) and a candidate (B). The page defaults to the two
-versions that share the most questions and differ the most.
+Pick a baseline (A) and a candidate (B), and a significance level (0.05
+by default). The page defaults to the two versions that share the most
+questions and differ the most.
 
-- **Headline deltas** show B's value and B − A for each metric.
+- **Headline deltas** show B's value and B − A for each metric. Under each
+  delta, *significant* means a paired test says the change is unlikely to
+  be chance; *within noise* means it could be.
+- **Is the difference real?** plots every delta with its confidence
+  interval on a fixed −1 to +1 axis. An interval that crosses 0 could be
+  chance. The table lists the p-values and a verdict: *real improvement*,
+  *real regression*, *could be chance* or *no change*. When nothing is
+  significant, a note says the smallest change your question set could
+  have detected. If that number is large, add questions.
 - **What changed, question by question** matches runs by question text and
   labels each one *regressed*, *mixed*, *improved* or *unchanged*. Use this
   to catch a regression that the mean hides.
 - **Regression gate:** set floors and an allowed drop with sliders, see
-  PASS or FAIL, and copy the matching `anchor gate` command for CI.
+  PASS or FAIL, and copy the matching `anchor gate` command for CI. Turn on
+  **Only fail on significant drops** to ignore drops the paired test can't
+  call real.
 
 ### Inspect
 
@@ -154,8 +165,8 @@ Choose a version and a question to see one run in full:
 
 - the score cards
 - the generated answer
-- the **claim-level audit**: each claim marked ✓ with the chunk it cites,
-  or ✗ with the reason
+- the **claim-level audit**: each claim marked *Supported* with the chunk
+  it cites, or *Unsupported* with the reason
 - the **retrieved chunks** in rank order, tagged *relevant* (ground truth)
   and *cited by judge*, plus any relevant chunks that weren't retrieved
 - the **trace**: how long each step took
@@ -173,8 +184,9 @@ example.
 anchor demo                                   # two toy pipelines on 8 questions
 anchor run my_rag:pipeline questions.json -v v3 -k 5
 anchor score outputs.jsonl -v prod-2026-10-11  # score logged outputs (same format as the upload tab)
-anchor compare v2 v3                           # means, deltas, regressed questions
+anchor compare v2 v3                           # means, deltas, regressed questions, significance
 anchor gate v3 --min-recall 0.9 --baseline v2 --max-faithfulness-drop 0.05
+anchor gate v3 --baseline v2 --max-recall-drop 0.02 --require-significant
 ```
 
 Every command takes `--db PATH` (default `anchor_traces.db`). `run` and
@@ -184,9 +196,14 @@ Every command takes `--db PATH` (default `anchor_traces.db`). `run` and
 - **`anchor run`** imports `module:function`, a function taking a question
   and returning `(chunks, answer)`. Add `--factory` if the function builds
   and returns the pipeline instead.
+- **`anchor compare`** prints JSON. Its `significance` block has, per
+  metric, `n` (shared questions), `mean_delta`, `ci_low`/`ci_high`,
+  `p_value`, `significant` and `mde` (smallest detectable change).
+  `--alpha` sets the level.
 - **`anchor gate`** exits with code 1 on failure, so it can fail a CI job.
   Available metrics are `faithfulness`, `recall`, `mrr`, `ndcg` and `map`,
-  each with `--min-X` and `--max-X-drop`.
+  each with `--min-X` and `--max-X-drop`. `--require-significant` lets a
+  drop beyond `--max-X-drop` pass when it isn't significant at `--alpha`.
 
 ## 4. Python
 
@@ -200,6 +217,11 @@ def my_pipeline(query: str):
 
 results = evaluate_pipeline(my_pipeline, dataset, pipeline_version="v3", k=5)
 print(summarize(results))
+
+# is v3 really better than v2?
+from anchor import compare_versions
+sig = compare_versions("anchor_traces.db", "v2", "v3")["significance"]
+print(sig["recall_at_k"]["p_value"], sig["recall_at_k"]["ci_low"], sig["recall_at_k"]["ci_high"])
 
 # or, from logs:
 from anchor import load_records
@@ -226,6 +248,10 @@ Then open the dashboard to inspect the runs.
   The key is wrong or revoked. The run still completed, using the heuristic.
 - **Retrieval columns are blank.** Those questions have no reference chunk
   ids, so only faithfulness was scored.
+- **Every change says "could be chance".** Your question set is too
+  small to detect changes that size. The note under the table says how
+  big a change it can detect; add questions until that is smaller than
+  the changes you care about.
 - **Compare says no questions in common.** The two versions were run on
   different question sets. Questions are matched by exact text.
 - **Scores look identical across retrievers.** On a small corpus where the

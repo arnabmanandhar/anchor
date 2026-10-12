@@ -61,7 +61,7 @@ def test_single_answer_catches_the_hallucinated_claim():
     next(b for b in at.button if b.label == "Score").click().run()
     assert not at.exception
     html = " ".join(m.value for m in at.markdown)
-    assert "0.50" in html and "✗" in html
+    assert "0.50" in html and "Unsupported" in html
 
 
 def test_score_charts_use_fixed_unit_domain():
@@ -104,3 +104,13 @@ def test_public_mode_gives_each_session_a_private_workspace(workspace, monkeypat
     assert a.session_state["db_path"] != b.session_state["db_path"]
     assert not workspace.exists()  # the shared DB was never touched
     assert any("Private workspace" in c.value for c in a.sidebar.caption)
+
+
+def test_compare_shows_significance_and_gate_toggle():
+    at = page("compare").run()
+    assert not at.exception
+    assert any("Is the difference real?" in m.value for m in at.markdown)
+    assert any("p-value" in df.value.columns for df in at.dataframe)
+    at.toggle[0].set_value(True).run()
+    assert not at.exception
+    assert any("--require-significant" in c.value for c in at.code)

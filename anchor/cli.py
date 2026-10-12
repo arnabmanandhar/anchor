@@ -100,6 +100,7 @@ def main(argv=None) -> int:
     cmp_p.add_argument("version_a")
     cmp_p.add_argument("version_b")
     cmp_p.add_argument("--db", default="anchor_traces.db")
+    cmp_p.add_argument("--alpha", type=float, default=0.05, help="significance level (default 0.05)")
 
     gate_p = sub.add_parser("gate", help="Fail (exit 1) if a version misses its thresholds")
     gate_p.add_argument("version")
@@ -109,6 +110,9 @@ def main(argv=None) -> int:
     gate_p.add_argument("--baseline", help="version to compare against for --max-*-drop checks")
     for name in GATE_METRICS:
         gate_p.add_argument(f"--max-{name}-drop", type=float, metavar="X", help=f"allowed drop in {name} vs baseline")
+    gate_p.add_argument("--require-significant", action="store_true",
+                        help="fail a --max-*-drop check only if the drop is statistically significant")
+    gate_p.add_argument("--alpha", type=float, default=0.05, help="significance level (default 0.05)")
 
     args = parser.parse_args(argv)
 
@@ -127,7 +131,7 @@ def main(argv=None) -> int:
         results = evaluate_records(records, pipeline_version=args.version, k=args.k, judge=judge, db_path=args.db)
         print(json.dumps(summarize(results), indent=2))
     elif args.command == "compare":
-        print(json.dumps(compare_versions(args.db, args.version_a, args.version_b), indent=2))
+        print(json.dumps(compare_versions(args.db, args.version_a, args.version_b, alpha=args.alpha), indent=2))
     elif args.command == "gate":
         floors = {n: getattr(args, f"min_{n}") for n in GATE_METRICS if getattr(args, f"min_{n}") is not None}
         drops = {n: getattr(args, f"max_{n}_drop") for n in GATE_METRICS if getattr(args, f"max_{n}_drop") is not None}
@@ -135,7 +139,8 @@ def main(argv=None) -> int:
             parser.error("--max-*-drop checks need --baseline")
         if not floors and not drops:
             parser.error("give at least one --min-* or --max-*-drop threshold")
-        result = run_gate(args.db, args.version, floors=floors, baseline=args.baseline, max_drop=drops)
+        result = run_gate(args.db, args.version, floors=floors, baseline=args.baseline, max_drop=drops,
+                          require_significant=args.require_significant, alpha=args.alpha)
         print(result.report())
         return 0 if result.passed else 1
     else:

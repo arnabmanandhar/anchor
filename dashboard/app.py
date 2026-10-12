@@ -33,12 +33,12 @@ views.setup()
 
 views.PAGES.update(
     {
-        "home": st.Page(views.page_home, title="Home", icon="⚓", default=True),
-        "evaluate": st.Page(views.page_evaluate, title="Evaluate", icon="▶️", url_path="evaluate"),
-        "results": st.Page(views.page_results, title="Results", icon="📊", url_path="results"),
-        "compare": st.Page(views.page_compare, title="Compare", icon="⚖️", url_path="compare"),
-        "inspect": st.Page(views.page_inspect, title="Inspect", icon="🔍", url_path="inspect"),
-        "learn": st.Page(views.page_learn, title="Learn the metrics", icon="📘", url_path="learn"),
+        "home": st.Page(views.page_home, title="Home", icon=":material/anchor:", default=True),
+        "evaluate": st.Page(views.page_evaluate, title="Evaluate", icon=":material/play_circle:", url_path="evaluate"),
+        "results": st.Page(views.page_results, title="Results", icon=":material/bar_chart:", url_path="results"),
+        "compare": st.Page(views.page_compare, title="Compare", icon=":material/compare_arrows:", url_path="compare"),
+        "inspect": st.Page(views.page_inspect, title="Inspect", icon=":material/manage_search:", url_path="inspect"),
+        "learn": st.Page(views.page_learn, title="Learn the metrics", icon=":material/menu_book:", url_path="learn"),
     }
 )
 

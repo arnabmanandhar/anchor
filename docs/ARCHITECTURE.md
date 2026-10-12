@@ -27,10 +27,11 @@
 | `runner.py` | `_evaluate_case` is the single code path. `evaluate_pipeline` calls your function; `evaluate_records` replays logged outputs. | the four above |
 | `records.py` | Parses and validates logged outputs (JSON/JSONL/CSV, common field aliases) | — |
 | `sandbox.py` | Toy RAG parts for the dashboard: corpus parsing, BM25 / TF-IDF / keyword / hybrid retrievers, extractive or Claude generators. Sample input, not part of evaluation. | — |
-| `compare.py` | Aggregate means, plus a per-question diff matched by query text | tracer |
-| `gate.py` | Floors and allowed drops, returning a pass/fail result | compare |
+| `compare.py` | Aggregate means, a per-question diff matched by query text, and per-metric significance | tracer, stats |
+| `stats.py` | Paired bootstrap CIs, sign-flip permutation test, minimum detectable effect. Pure Python, seeded. | — |
+| `gate.py` | Floors and allowed drops (optionally only significant drops), returning a pass/fail result | compare |
 | `cli.py` | `anchor demo · run · score · compare · gate` | all |
-| `dashboard/app.py`, `dashboard/ui.py` | Streamlit pages; styles and charts | all, streamlit, altair |
+| `dashboard/app.py`, `views.py`, `ui.py` | Streamlit navigation, pages, styles and charts | all, streamlit, altair |
 
 ## Design decisions
 
@@ -45,6 +46,10 @@
   Citations of chunks that weren't retrieved are rejected.
 - **One evaluation path.** Pipelines, logs and the sandbox all go through
   `_evaluate_case`, so the numbers are comparable whatever the source.
+- **Statistics, not vibes.** A mean delta comes with a confidence interval
+  and a p-value from a paired test, so "v3 is better" is a claim Anchor can
+  back up. Tests are seeded and the permutation test is exact on small
+  sets, so these numbers are as reproducible as the metrics.
 - **SQLite, no server.** Traces are one file, easy to inspect, copy or
   delete. The dashboard reads the same file the CLI writes.
 - **Safe to host publicly.** Keys stay in the session. Errors are reduced
@@ -69,6 +74,8 @@ ids), `latency_ms`, `cost_usd`, `created_at`.
   leakage on failure
 - `test_tracer_compare_gate.py`: storage, upgrades of old databases,
   per-question regressions, gate exit codes
+- `test_stats.py`: hand-computed p-values, CIs and detectable effect;
+  determinism; the gate ignoring noise but not real drops
 - `test_sandbox_records.py`: retrievers, corpus, dataset and record parsing
 - `test_dashboard.py`: every page renders headlessly, the evaluate flows
   run, and keys never appear on the page

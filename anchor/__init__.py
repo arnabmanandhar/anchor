@@ -14,7 +14,8 @@ from .judge import FaithfulnessJudge
 from .tracer import Tracer, Span
 from .runner import evaluate_pipeline, evaluate_records, summarize
 from .records import load_records
-from .compare import compare_versions
+from .compare import compare_versions, significance
+from .stats import paired_test, bootstrap_ci, min_detectable_effect
 from .gate import run_gate, GateResult
 
 __all__ = [
@@ -37,8 +38,12 @@ __all__ = [
     "load_records",
     "summarize",
     "compare_versions",
+    "significance",
+    "paired_test",
+    "bootstrap_ci",
+    "min_detectable_effect",
     "run_gate",
     "GateResult",
 ]
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

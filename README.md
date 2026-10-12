@@ -142,6 +142,12 @@ The comparison reports mean deltas and lists the individual queries that
 regressed or improved. A flat mean can hide a regression on one question
 that another question's gain cancels out.
 
+It also says whether each change is **statistically real**. Anchor pairs
+the two versions' scores question by question and reports a bootstrap
+confidence interval and a permutation-test p-value for every delta, plus
+the smallest change your question set can detect. A +0.04 on 12 questions
+is usually noise, and Anchor tells you so.
+
 Already logging your pipeline's outputs? Score the log directly, in the
 same format the dashboard's upload tab accepts:
 
@@ -171,6 +177,10 @@ anchor gate v3-hybrid-retrieval \
 
 Metrics: `faithfulness`, `recall`, `mrr`, `ndcg`, `map`. With the heuristic
 judge (no key), every number is deterministic, so the gate never flakes.
+
+Add `--require-significant` to fail a drop check only when a paired test
+says the drop is real (p < `--alpha`, default 0.05). Floors always apply.
+This keeps a gate on a small question set from going red on noise.
 See `.github/workflows/ci.yml` for a working example.
 
 ## The dashboard
@@ -182,7 +192,7 @@ streamlit run dashboard/app.py
 You can run evaluations in the browser, not only view CLI runs:
 
 - **Evaluate** offers three ways in:
-  - **Build & run a pipeline.** Load a corpus (sample, upload, or paste),
+  - **Build and run a pipeline.** Load a corpus (sample, upload, or paste),
     edit the questions in a table, and pick a retriever (BM25, TF-IDF,
     keyword or hybrid), k, a generator (extractive or Claude) and a judge.
     Then run. One checkbox runs every retriever for a quick comparison.
@@ -193,7 +203,8 @@ You can run evaluations in the browser, not only view CLI runs:
     metrics and the claim-by-claim audit.
 - **Results** shows per-version means on a fixed 0–1 axis, per-question
   bars, every run, and CSV and JSON downloads.
-- **Compare** shows headline deltas, which questions regressed, and an
+- **Compare** shows headline deltas with a significance verdict, a
+  confidence-interval chart, which questions regressed, and an
   interactive regression gate that prints the matching `anchor gate`
   command.
 - **Inspect** shows one run in full: the answer, each claim with the chunk
@@ -238,6 +249,7 @@ anchor/
   records.py            Load/validate logged outputs (JSON / JSONL / CSV)
   sandbox.py            Built-in toy retrievers + generators for the dashboard
   compare.py            Diffs two pipeline versions, overall and per query
+  stats.py              Paired bootstrap CIs, permutation test, detectable effect
   gate.py               Pass/fail thresholds for CI
   cli.py                `anchor demo | run | score | compare | gate`
 dashboard/
@@ -246,6 +258,6 @@ dashboard/
   ui.py                 Styles, score cards, fixed 0–1 charts
 docs/                   User guide, metrics derivations, architecture
 examples/               Sample corpus, questions, logged records, toy pipelines
-tests/                  Metrics, judge, sandbox, records, gate, dashboard (60 tests, offline)
+tests/                  Metrics, judge, sandbox, records, gate, dashboard (71 tests, offline)
 DEPLOYMENT.md           Secure public deploy on Streamlit Community Cloud
 ```

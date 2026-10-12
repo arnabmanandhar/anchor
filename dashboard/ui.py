@@ -54,6 +54,10 @@ h1, h2, h3 {letter-spacing: -0.01em;}
 .claim {border-radius: 10px; padding: .6rem .85rem; margin: .35rem 0; border: 1px solid;}
 .claim.ok {border-color: rgba(0,131,0,.35); background: rgba(0,131,0,.07);}
 .claim.bad {border-color: rgba(227,73,72,.45); background: rgba(227,73,72,.08);}
+.claim .pill {display: inline-block; font-size: .7rem; font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
+  padding: .05rem .5rem; border-radius: 999px; margin-right: .45rem; vertical-align: 1px;}
+.claim.ok .pill {background: rgba(0,131,0,.14); color: #008300;}
+.claim.bad .pill {background: rgba(227,73,72,.14); color: #e34948;}
 .claim .meta {font-size: .8rem; opacity: .75; margin-top: .2rem;}
 .chunk {border: 1px solid rgba(128,128,128,0.25); border-radius: 10px; padding: .55rem .8rem; margin: .3rem 0;}
 .badge {display: inline-block; font-size: .72rem; padding: .05rem .45rem; border-radius: 999px; margin-right: .3rem;
@@ -153,6 +157,31 @@ def per_query_bars(df: pd.DataFrame, metric: str, all_versions: List[str]) -> al
     )
 
 
+def delta_ci_chart(tests: Dict[str, Dict]) -> alt.Chart:
+    """Mean paired difference per metric with its confidence interval, on a
+    fixed −1 to +1 axis (every score difference lives there)."""
+    order = [m[2] for m in METRICS]
+    data = pd.DataFrame([
+        {"metric": METRIC_LABELS[k], "delta": t["mean_delta"], "low": t["ci_low"], "high": t["ci_high"],
+         "p": t["p_value"], "verdict": ("improved" if t["mean_delta"] > 0 else "regressed") if t["significant"] else "not significant"}
+        for k, t in tests.items()
+    ])
+    x = alt.Scale(domain=[-1, 1], nice=False)
+    colour = alt.Color("verdict:N", title=None, legend=alt.Legend(orient="top"),
+                       scale=alt.Scale(domain=["improved", "regressed", "not significant"],
+                                       range=[SERIES[5], SERIES[7], "#8a8f98"]))
+    y = alt.Y("metric:N", sort=order, title=None)
+    tooltip = [alt.Tooltip("metric:N", title="Metric"), alt.Tooltip("delta:Q", title="Δ (B − A)", format="+.3f"),
+               alt.Tooltip("low:Q", title="CI low", format="+.3f"), alt.Tooltip("high:Q", title="CI high", format="+.3f"),
+               alt.Tooltip("p:Q", title="p-value", format=".3f")]
+    zero = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color="#8a8f98", strokeDash=[4, 3]).encode(x=alt.X("x:Q", scale=x))
+    interval = alt.Chart(data).mark_rule(strokeWidth=3).encode(
+        y=y, x=alt.X("low:Q", scale=x, title="Change B − A (−1 to +1)", axis=alt.Axis(values=[-1, -0.5, 0, 0.5, 1], format="+.1f")),
+        x2="high:Q", color=colour, tooltip=tooltip)
+    point = alt.Chart(data).mark_point(filled=True, size=90).encode(y=y, x=alt.X("delta:Q", scale=x), color=colour, tooltip=tooltip)
+    return (zero + interval + point).properties(height=44 * len(data) + 40)
+
+
 def span_chart(spans: List[Dict]) -> alt.Chart:
     data = pd.DataFrame(spans)[["name", "duration_ms"]]
     return (
@@ -179,7 +208,7 @@ def claim_cards(claims: List[Dict]) -> None:
         ok = c.get("supported")
         meta = f"Supported by chunk <b>{esc(c.get('chunk_id'))}</b>" if ok else f"Unsupported. {esc(c.get('note') or '')}"
         st.markdown(
-            f'<div class="claim {"ok" if ok else "bad"}">{"✓" if ok else "✗"} {esc(c.get("claim"))}'
+            f'<div class="claim {"ok" if ok else "bad"}"><span class="pill">{"Supported" if ok else "Unsupported"}</span>{esc(c.get("claim"))}'
             f'<div class="meta">{meta}</div></div>',
             unsafe_allow_html=True,
         )

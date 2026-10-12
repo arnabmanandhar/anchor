@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from typing import Dict, List, Optional
 
+from .stats import paired_test
 from .tracer import Tracer
 
 METRIC_KEYS = ("mean_faithfulness", "mean_recall_at_k", "mean_mrr", "mean_ndcg_at_k", "mean_map", "mean_latency_ms")
@@ -76,7 +77,20 @@ def per_query_diff(runs_a: List[Dict], runs_b: List[Dict], tolerance: float = 1e
     return rows
 
 
-def compare_versions(db_path: str, version_a: str, version_b: str) -> Dict:
+def significance(runs_a: List[Dict], runs_b: List[Dict], alpha: float = 0.05) -> Dict[str, Dict]:
+    """Paired significance test per metric over the questions both versions
+    answered (latest run per query, as in per_query_diff). Keyed like
+    _PER_QUERY_KEYS; see stats.paired_test for the fields."""
+    latest_a = {r["query"]: _run_metrics(r) for r in runs_a}
+    latest_b = {r["query"]: _run_metrics(r) for r in runs_b}
+    shared = sorted(set(latest_a) & set(latest_b))
+    return {
+        key: paired_test([latest_a[q][key] for q in shared], [latest_b[q][key] for q in shared], alpha=alpha)
+        for key in _PER_QUERY_KEYS
+    }
+
+
+def compare_versions(db_path: str, version_a: str, version_b: str, alpha: float = 0.05) -> Dict:
     tracer = Tracer(db_path)
     runs_a = tracer.fetch_runs(version_a)
     runs_b = tracer.fetch_runs(version_b)
@@ -95,4 +109,5 @@ def compare_versions(db_path: str, version_a: str, version_b: str) -> Dict:
         "diff (b - a)": diff,
         "regressed_queries": [q["query"] for q in queries if q["status"] in ("regressed", "mixed")],
         "improved_queries": [q["query"] for q in queries if q["status"] == "improved"],
+        "significance": significance(runs_a, runs_b, alpha=alpha),
     }

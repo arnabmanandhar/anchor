@@ -16,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import ui  # noqa: E402
 from anchor.cli import run_demo  # noqa: E402
-from anchor.compare import per_query_diff, summarize_runs  # noqa: E402
-from anchor.gate import GATE_METRICS  # noqa: E402
+from anchor.compare import per_query_diff, significance, summarize_runs  # noqa: E402
+from anchor.gate import GATE_METRICS, GATE_RUN_KEYS  # noqa: E402
 from anchor.judge import DEFAULT_MODEL, FaithfulnessJudge  # noqa: E402
 from anchor.records import load_records  # noqa: E402
 from anchor.retrieval_metrics import all_retrieval_metrics  # noqa: E402
@@ -67,7 +67,7 @@ def db() -> str:
 def setup() -> None:
     """Per-run setup. Called from app.py on every rerun (module-level code
     in an imported module would only run once per server process)."""
-    st.set_page_config(page_title="Anchor · RAG evaluation", page_icon="⚓", layout="wide")
+    st.set_page_config(page_title="Anchor · RAG evaluation", page_icon=":material/anchor:", layout="wide")
     ui.inject_css()
     _seed_once()
 
@@ -137,7 +137,7 @@ def make_judge(choice: str) -> FaithfulnessJudge:
 
 def sidebar() -> None:
     with st.sidebar:
-        st.markdown("### ⚓ Anchor")
+        st.markdown("### :material/anchor: Anchor")
         st.caption("Deterministic-first evaluation for RAG pipelines.")
         st.divider()
         st.markdown("**LLM judge (optional)**")
@@ -151,15 +151,15 @@ def sidebar() -> None:
         )
         key, source = resolve_key()
         if key:
-            st.success(f"LLM judge available, using {source}.", icon="✅")
+            st.success(f"LLM judge available, using {source}.", icon=":material/check_circle:")
         else:
-            st.info("Running offline: the heuristic judge is used. Add a key to audit claims with Claude.", icon="💡")
+            st.info("Running offline: the heuristic judge is used. Add a key to audit claims with Claude.", icon=":material/info:")
         if _server_key() and not st.session_state.get("user_api_key"):
             left = max(SERVER_KEY_SESSION_LIMIT - st.session_state.get("server_key_calls", 0), 0)
             st.caption(f"{left} LLM calls left on the server's key this session.")
         st.divider()
         if public_mode():
-            st.caption("🔒 Private workspace: your runs are visible only in this browser session.")
+            st.caption(":material/lock: Private workspace: your runs are visible only in this browser session.")
         else:
             st.caption(f"Workspace: `{Path(db()).name}` (shared with the `anchor` CLI)")
         st.caption("[GitHub](https://github.com/arnabmanandhar/anchor) · [User guide](https://github.com/arnabmanandhar/anchor/blob/main/docs/USER_GUIDE.md)")
@@ -170,21 +170,21 @@ def sidebar() -> None:
 
 def page_home():
     st.markdown(
-        '<div class="anchor-hero"><h1>⚓ Anchor</h1>'
+        '<div class="anchor-hero"><h1>Anchor</h1>'
         "<p>Did this change to my RAG pipeline make it better or worse? Anchor answers that with "
         "<b>retrieval metrics that are pure math</b> and a <b>faithfulness judge that has to show its work</b>.</p></div>",
         unsafe_allow_html=True,
     )
     c1, c2, c3 = st.columns(3)
-    c1.markdown(ui.card("📐 Deterministic retrieval metrics",
+    c1.markdown(ui.card("Deterministic retrieval metrics",
                         "Recall@k, MRR, nDCG@k and MAP from ranked chunk ids against ground truth. "
                         "No model call, so the same input always gives the same number and CI never flakes."),
                 unsafe_allow_html=True)
-    c2.markdown(ui.card("🔎 Audited faithfulness",
+    c2.markdown(ui.card("Audited faithfulness",
                         "The judge splits an answer into claims and must cite the retrieved chunk that "
                         "supports each one. The score is supported ÷ total claims, so every number has a reason."),
                 unsafe_allow_html=True)
-    c3.markdown(ui.card("🧭 Traces and regression gates",
+    c3.markdown(ui.card("Traces and regression gates",
                         "Every run is stored with timed spans. Compare two versions query by query, and "
                         "fail a build when recall or faithfulness drops."),
                 unsafe_allow_html=True)
@@ -194,15 +194,15 @@ def page_home():
     with a:
         st.markdown("**Try it in 30 seconds**")
         st.caption("Pick a sample corpus and retriever and run an evaluation right here in the browser.")
-        nav_link("evaluate", label="Evaluate a pipeline", icon="▶️")
+        nav_link("evaluate", label="Evaluate a pipeline", icon=":material/play_circle:")
     with b:
         st.markdown("**Bring your own pipeline**")
         st.caption("Upload a JSONL of the queries, ranked chunks and answers your system produced.")
-        nav_link("evaluate", label="Upload outputs", icon="📤")
+        nav_link("evaluate", label="Upload outputs", icon=":material/upload_file:")
     with c:
         st.markdown("**Understand the numbers**")
         st.caption("What each metric measures, with the formulas and worked examples.")
-        nav_link("learn", label="Learn the metrics", icon="📘")
+        nav_link("learn", label="Learn the metrics", icon=":material/menu_book:")
 
     st.markdown("#### How it works")
     st.graphviz_chart(
@@ -248,12 +248,12 @@ def _questions_frame(rows) -> pd.DataFrame:
 
 def _show_run_summary(results, versions):
     s = summarize(results)
-    st.success(f"Evaluated {s['n_runs']} cases across {len(versions)} version(s): {', '.join(versions)}.", icon="✅")
+    st.success(f"Evaluated {s['n_runs']} cases across {len(versions)} version(s): {', '.join(versions)}.", icon=":material/check_circle:")
     ui.score_cards({k: s.get(sk) for k, sk, _, _ in ui.METRICS})
     c1, c2 = st.columns(2)
-    nav_link("results", label="See full results", icon="📊", container=c1)
+    nav_link("results", label="See full results", icon=":material/bar_chart:", container=c1)
     if len(versions) > 1 or len(all_versions(load_df())) > 1:
-        nav_link("compare", label="Compare versions", icon="⚖️", container=c2)
+        nav_link("compare", label="Compare versions", icon=":material/compare_arrows:", container=c2)
 
 
 def _tab_build():
@@ -513,7 +513,7 @@ def _tab_single():
 
 def page_evaluate():
     st.title("Evaluate")
-    t1, t2, t3 = st.tabs(["🧪 Build & run a pipeline", "📤 Upload your pipeline's outputs", "✍️ Score a single answer"])
+    t1, t2, t3 = st.tabs(["Build and run a pipeline", "Upload your pipeline's outputs", "Score a single answer"])
     with t1:
         _tab_build()
     with t2:
@@ -531,7 +531,7 @@ def page_results():
     versions = all_versions(df)
     if df.empty:
         st.info("No runs yet.")
-        nav_link("evaluate", label="Run an evaluation", icon="▶️")
+        nav_link("evaluate", label="Run an evaluation", icon=":material/play_circle:")
         return
     selected = st.multiselect("Versions", versions, default=versions)
     view = df[df["pipeline_version"].isin(selected)]
@@ -602,7 +602,7 @@ def page_compare():
     versions = all_versions(df)
     if len(versions) < 2:
         st.info("Compare needs runs from at least two versions.")
-        nav_link("evaluate", label="Run another version", icon="▶️")
+        nav_link("evaluate", label="Run another version", icon=":material/play_circle:")
         return
     # Default to the pair that shares the most questions, preferring the
     # pair whose scores differ most (an identical pair is a dull default).
@@ -611,28 +611,41 @@ def page_compare():
     means = df.groupby("pipeline_version")[metric_keys].mean().fillna(0)
     best = max(((a, b) for i, a in enumerate(versions) for b in versions[i + 1:]),
                key=lambda p: (len(queries[p[0]] & queries[p[1]]), float((means.loc[p[0]] - means.loc[p[1]]).abs().sum())))
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns([2, 2, 1])
     va = c1.selectbox("Baseline (A)", versions, index=versions.index(best[0]))
     vb = c2.selectbox("Candidate (B)", versions, index=versions.index(best[1]))
+    alpha = c3.selectbox("Significance level", [0.01, 0.05, 0.10], index=1, format_func=lambda a: f"{a:g}",
+                         help="A difference counts as real when its p-value is below this. 0.05 is the usual choice.")
     if va == vb:
         st.warning("Pick two different versions.")
         return
     runs_a = df[df["pipeline_version"] == va].to_dict("records")
     runs_b = df[df["pipeline_version"] == vb].to_dict("records")
     sa, sb = summarize_runs(runs_a), summarize_runs(runs_b)
+    sig = significance(runs_a, runs_b, alpha=alpha)
 
     cols = st.columns(len(ui.METRICS))
     for col, (key, skey, label, hint) in zip(cols, ui.METRICS):
         a, b = sa.get(skey), sb.get(skey)
         if a is None or b is None:
             col.metric(label, "—")
+            continue
+        delta = f"{b - a:+.3f}" if abs(b - a) > 1e-9 else None
+        col.metric(label, f"{b:.3f}", delta=delta, help=f"{hint}. B = {vb}, A = {va}.")
+        test = sig[key]
+        if delta is None or test["n"] < 2:
+            continue
+        if test["significant"]:
+            col.caption(f":{'green' if test['mean_delta'] > 0 else 'red'}[:material/verified: significant] · p = {test['p_value']:.3f}")
         else:
-            delta = f"{b - a:+.3f}" if abs(b - a) > 1e-9 else None
-            col.metric(label, f"{b:.3f}", delta=delta, help=f"{hint}. B = {vb}, A = {va}.")
-    st.caption(f"Values are {vb} (B); the delta is B − A.")
+            col.caption(f":gray[within noise] · p = {test['p_value']:.3f}")
+    st.caption(f"Values are {vb} (B); the delta is B − A. *Significant* means a paired test on the shared "
+               f"questions says the change is unlikely to be chance (p < {alpha:g}).")
 
     pair = df[df["pipeline_version"].isin([va, vb])]
     st.altair_chart(ui.metric_bars(pair.groupby("pipeline_version")[metric_keys].mean(), versions), width="stretch")
+
+    _significance_section(sig, va, vb, alpha)
 
     st.markdown("##### What changed, question by question")
     st.caption("Runs are matched by question text. A flat mean can hide one question getting worse while another gets better.")
@@ -640,16 +653,17 @@ def page_compare():
     if not diffs:
         st.info("These versions have no questions in common.")
     else:
-        icon = {"improved": "🟢 improved", "regressed": "🔴 regressed", "mixed": "🟠 mixed", "unchanged": "⚪ unchanged"}
+        order = ["regressed", "mixed", "improved", "unchanged"]
+        colour = {"regressed": "red", "mixed": "orange", "improved": "green", "unchanged": "gray"}
         counts = pd.Series([d["status"] for d in diffs]).value_counts()
-        st.markdown(" · ".join(f"**{counts.get(s, 0)}** {icon[s]}" for s in ("regressed", "mixed", "improved", "unchanged")))
+        st.markdown(" · ".join(f"**{counts.get(s, 0)}** :{colour[s]}[{s}]" for s in order))
         st.dataframe(
             pd.DataFrame([{
-                "Question": d["query"], "Status": icon[d["status"]],
+                "Question": d["query"], "Status": d["status"],
                 "Faithfulness A": d["a"]["faithfulness"], "Faithfulness B": d["b"]["faithfulness"],
                 "Δ faithfulness": d["delta"]["faithfulness"], "Δ recall@k": d["delta"]["recall_at_k"],
                 "Δ MRR": d["delta"]["mrr"], "Δ nDCG@k": d["delta"]["ndcg_at_k"],
-            } for d in sorted(diffs, key=lambda d: ["regressed", "mixed", "improved", "unchanged"].index(d["status"]))]),
+            } for d in sorted(diffs, key=lambda d: order.index(d["status"]))]),
             hide_index=True, width="stretch",
             column_config={"Question": st.column_config.TextColumn(width="large"),
                            "Faithfulness A": ui.score_column("Faithfulness A"),
@@ -663,23 +677,84 @@ def page_compare():
     g1, g2 = st.columns(2)
     floor_recall = g1.slider("Minimum recall@k", 0.0, 1.0, 0.8, 0.05)
     floor_faith = g1.slider("Minimum faithfulness", 0.0, 1.0, 0.8, 0.05)
-    max_drop = g2.slider("Largest allowed drop vs A (any metric)", 0.0, 0.5, 0.02, 0.01)
+    max_drop = g1.slider("Largest allowed drop vs A (any metric)", 0.0, 0.5, 0.02, 0.01)
+    only_sig = g1.toggle("Only fail on significant drops", value=False,
+                         help="A drop larger than allowed fails only if the paired test says it is real. "
+                              "Floors always apply. Useful on small question sets, where means are noisy.")
     checks = []
     for name, floor in (("recall", floor_recall), ("faithfulness", floor_faith)):
         v = sb.get(GATE_METRICS[name])
         checks.append((v is not None and v >= floor, f"{name} {('n/a' if v is None else f'{v:.3f}')} ≥ {floor:.2f}"))
     for name, skey in GATE_METRICS.items():
         a, b = sa.get(skey), sb.get(skey)
-        if a is not None and b is not None:
-            checks.append((a - b <= max_drop + 1e-12, f"{name} drop {a - b:+.3f} ≤ {max_drop:.2f}"))
+        if a is None or b is None:
+            continue
+        ok, text = a - b <= max_drop + 1e-12, f"{name} drop {a - b:+.3f} ≤ {max_drop:.2f}"
+        test = sig[GATE_RUN_KEYS[name]]
+        if only_sig and test["n"] >= 2:
+            text += f" (p = {test['p_value']:.3f})"
+            if not ok and not test["significant"]:
+                ok, text = True, text + ", not significant"
+        checks.append((ok, text))
     passed = all(ok for ok, _ in checks)
     g2.markdown(f'<span class="badge {"pass" if passed else "fail"}" style="font-size:1rem;padding:.2rem .7rem">'
                 f'{"PASS" if passed else "FAIL"}</span>', unsafe_allow_html=True)
     for ok, text in checks:
-        g2.markdown(f"{'✅' if ok else '❌'} {text}")
+        g2.markdown(f"{':green[:material/check_circle:]' if ok else ':red[:material/cancel:]'} {text}")
     floors_cli = f"--min-recall {floor_recall:g} --min-faithfulness {floor_faith:g}"
     drops_cli = " ".join(f"--max-{n}-drop {max_drop:g}" for n in GATE_METRICS)
-    st.code(f"anchor gate {vb} {floors_cli} --baseline {va} {drops_cli}", language="bash")
+    sig_cli = f" --require-significant --alpha {alpha:g}" if only_sig else ""
+    st.code(f"anchor gate {vb} {floors_cli} --baseline {va} {drops_cli}{sig_cli}", language="bash")
+
+
+def _verdict(test) -> str:
+    if abs(test["mean_delta"]) < 1e-12:
+        return "no change"
+    if test["significant"]:
+        return "real improvement" if test["mean_delta"] > 0 else "real regression"
+    return "could be chance"
+
+
+def _significance_section(sig, va, vb, alpha):
+    st.markdown("##### Is the difference real?")
+    tested = {k: t for k, t in sig.items() if t["n"] >= 2}
+    if not tested:
+        st.caption("Significance needs at least two questions answered by both versions.")
+        return
+    n = max(t["n"] for t in tested.values())
+    st.caption(
+        f"Each bar is the change B − A averaged over the {n} questions both versions answered, with its "
+        f"{(1 - alpha) * 100:g}% bootstrap confidence interval. If the interval crosses 0, the change could be chance."
+    )
+    st.altair_chart(ui.delta_ci_chart(tested), width="stretch")
+    st.dataframe(
+        pd.DataFrame([{
+            "Metric": ui.METRIC_LABELS[k], "Questions": t["n"], "A": t["mean_a"], "B": t["mean_b"],
+            "Δ (B − A)": t["mean_delta"], "CI low": t["ci_low"], "CI high": t["ci_high"],
+            "p-value": t["p_value"], "Verdict": _verdict(t),
+        } for k, t in tested.items()]),
+        hide_index=True, width="stretch",
+        column_config={"A": ui.score_column("A"), "B": ui.score_column("B"),
+                       **{c: st.column_config.NumberColumn(format="%+.3f") for c in ("Δ (B − A)", "CI low", "CI high")},
+                       "p-value": st.column_config.NumberColumn(format="%.3f"),
+                       "Verdict": st.column_config.TextColumn(width="medium")},
+    )
+    underpowered = [t["mde"] for t in tested.values()
+                    if not t["significant"] and t["mde"] is not None and t["mde"] > abs(t["mean_delta"])]
+    if underpowered:
+        st.info(f"With {n} shared questions, changes smaller than about ±{max(underpowered):.2f} can't be told apart "
+                "from noise. Add questions to detect smaller changes.", icon=":material/science:")
+    with st.expander("How this is computed"):
+        st.markdown(
+            "Anchor pairs the two versions' scores on each shared question and works on the differences, "
+            "which removes question-to-question variation.\n\n"
+            "- **p-value:** a sign-flip permutation test. If A and B were interchangeable, each difference would be "
+            "equally likely to be positive or negative. The p-value is the share of sign patterns with a mean at least "
+            "as extreme as the observed one. Exact for up to 14 questions, sampled above that.\n"
+            "- **Confidence interval:** percentile bootstrap of the mean difference, 5,000 resamples.\n"
+            "- **Smallest detectable change:** (1.96 + 0.84) × sd(Δ) / √n, the change a test this size catches 80% of the time.\n\n"
+            "Everything is seeded, so the same runs always give the same numbers. See *Learn the metrics* for details."
+        )
 
 
 # ================================================================= inspect

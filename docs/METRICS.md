@@ -166,6 +166,76 @@ LLM judge. Use the LLM judge for numbers you'll report.
 
 ---
 
+## Is a difference real? Significance testing
+
+Two versions' means differ by 0.10. Is B worse, or did a couple of
+questions just happen to go the other way? On a small question set the
+answer is often "noise", and shipping or blocking on noise is a coin flip.
+Anchor answers with three numbers on the Compare page and in
+`anchor compare`. They are computed in `anchor/stats.py`.
+
+All three work on **paired differences**. For each question both versions
+answered, $\Delta_i = b_i - a_i$. Pairing removes question difficulty from
+the picture: an easy question is easy for both versions, so only the change
+is left.
+
+### p-value: a sign-flip permutation test
+
+If A and B were interchangeable, each $\Delta_i$ would be just as likely to
+be positive as negative. The test flips the signs of the differences in
+every possible way and asks how often the mean is at least as far from 0
+as the one observed:
+
+$$
+p = \frac{\#\{\text{sign patterns } s : |\textstyle\sum_i s_i \Delta_i| \ge |\sum_i \Delta_i|\}}{2^n}
+$$
+
+With up to 14 questions all $2^n$ patterns are enumerated, so $p$ is
+exact. Above that, 5,000 patterns are sampled with a fixed seed. A change
+is **significant** when $p < \alpha$ (0.05 by default).
+
+*Example:* 10 questions, faithfulness drops by 0.5 on 6 of them and is
+unchanged on 4, so the mean drop is 0.30. Questions with $\Delta_i = 0$
+don't care about their sign, so only the 6 drops matter. Only "all
+negative" and "all positive" reach a sum of 3, so $p = 2/2^6 = 0.031$:
+a **real regression**.
+
+*Counter-example:* faithfulness drops by 1.0 on a single question out of
+10, so the mean drops by 0.10. Flipping that one sign gives the same
+magnitude, so $p = 1.0$. One question can never be significant evidence,
+however large its change.
+
+### Confidence interval: the percentile bootstrap
+
+Resample the $n$ differences with replacement 5,000 times, take each
+resample's mean, and report the 2.5th and 97.5th percentiles. An interval
+that excludes 0 points in a clear direction; one that crosses 0 means the
+true change could be zero. In the first example the 95% interval is
+$[-0.45, -0.15]$.
+
+On very small sets the interval and the p-value can disagree slightly,
+since they are different approximations. The gate uses the p-value.
+
+### Smallest detectable change
+
+$$
+\text{MDE} = (z_{0.975} + z_{0.8}) \cdot \frac{\text{sd}(\Delta)}{\sqrt{n}} \approx 2.80 \cdot \frac{\text{sd}(\Delta)}{\sqrt{n}}
+$$
+
+This is the true change a paired test of this size would catch 80% of the
+time at the 5% level. It turns "not significant" into something you can act
+on. If the MDE is 0.25 and you care about changes of 0.05, the test set is
+too small to tell you anything; quadrupling the questions halves the MDE.
+
+### In the gate
+
+`anchor gate --require-significant` changes one rule: a drop larger than
+`--max-X-drop` fails only if it is also significant at `--alpha`. Floors
+are never relaxed. Use it when the question set is small and a strict
+drop limit keeps going red on one or two questions.
+
+---
+
 ## Traces, latency and cost
 
 Every evaluated case is stored as a run in SQLite (`anchor_traces.db`), with
@@ -189,5 +259,6 @@ list prices. Your pipeline's own LLM calls are not metered.
   not fall more than 0.05 below `main`.
 
 With the heuristic judge, every input to the gate is deterministic, so a
-red build always means something changed. The Compare page has the same
-gate with sliders, and prints the matching CLI command.
+red build always means something changed. Add `--require-significant` to ignore
+drops a paired test can't call real (see above). The Compare page has the
+same gate with sliders, and prints the matching CLI command.
